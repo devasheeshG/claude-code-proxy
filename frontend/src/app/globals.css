@@ -1,0 +1,129 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Anthropic-inspired dark theme.
+
+   Warm charcoal surfaces, the Claude coral accent, and a restrained off-white
+   type scale. The ink, fog and brand token names are kept stable so components
+   read cleanly; the ink ramp goes dark to subtle, the fog ramp goes light to
+   muted.
+--------------------------------------------------------------------------- */
+
+@theme {
+    /* Surfaces — near-black app background up to lifted charcoal cards. */
+    --color-ink-950: #191917; /* app background */
+    --color-ink-900: #1f1e1c; /* sidebar, inset inputs / code panels */
+    --color-ink-850: #262522; /* cards / elevated surfaces */
+    --color-ink-800: #302f2b; /* hover wash */
+    --color-ink-700: #3b3a35; /* default borders */
+    --color-ink-600: #4a4942; /* strong borders / toggle off / scrollbar */
+    --color-ink-500: #5d5b51; /* hairline / parked rail */
+
+    /* Ink (text), lightest → most muted. fog-400 is lifted enough to clear
+       WCAG AA (4.5:1) on the card surfaces it labels. */
+    --color-fog-100: #f3f1ea; /* primary text */
+    --color-fog-200: #d6d3c9; /* strong secondary */
+    --color-fog-300: #aeaaa0; /* secondary */
+    --color-fog-400: #9a968c; /* muted / labels */
+
+    /* Claude coral. brand-400 lifts for hovers; brand-300 is the text-on-tint. */
+    --color-brand-500: #d97757;
+    --color-brand-400: #e2876a;
+    --color-brand-300: #eaa78d;
+
+    /* Status — readable on dark tints and as solid fills. */
+    --color-good-500: #4cb185;
+    --color-warn-500: #e0a55a;
+    --color-bad-500: #e98279; /* lifted for AA on the bad/10–15 tints it sits on */
+
+    /* Chart series — a warm, coral-led ramp tuned for the charcoal surfaces. Edit
+       these to re-tone every graph at once. chart-1 leads (coral); the rest add
+       variety for multi-series and ranked views. */
+    --color-chart-1: #d97757; /* coral — primary series (requests) */
+    --color-chart-2: #e0a55a; /* amber — secondary series (tokens) */
+    --color-chart-3: #4cb185; /* teal */
+    --color-chart-4: #b491c8; /* muted violet */
+    --color-chart-grid: #302f2b; /* gridlines (= ink-800) */
+    --color-chart-axis: #9a968c; /* axis tick labels (= fog-400) */
+
+    --font-sans:
+        ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+        sans-serif;
+    --font-serif: ui-serif, Georgia, "Times New Roman", serif;
+    --font-mono: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
+
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.3);
+    --shadow-pop: 0 16px 40px -8px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+* {
+    border-color: var(--color-ink-700);
+}
+
+html,
+body {
+    background-color: var(--color-ink-950);
+    color: var(--color-fog-100);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+}
+
+body {
+    font-feature-settings:
+        "tnum" 1,
+        "cv01" 1;
+}
+
+::selection {
+    background-color: color-mix(in srgb, var(--color-brand-500) 28%, transparent);
+    color: var(--color-fog-100);
+}
+
+/* Slim, warm scrollbars. */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-ink-600) transparent;
+}
+*::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+    background-color: var(--color-ink-600);
+    border-radius: 9999px;
+}
+*::-webkit-scrollbar-track {
+    background-color: transparent;
+}
+
+/* Drop the native number-input spinners; they crowd and clip the centred value. */
+input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+/* Keyboard focus is always visible, but mouse clicks don't draw a ring. */
+:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-brand-500) 80%, transparent);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* Respect a reduced-motion preference: keep transitions but make them instant. */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
