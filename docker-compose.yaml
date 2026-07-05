@@ -1,0 +1,49 @@
+name: claude-code-proxy
+
+services:
+  claude-code-proxy-backend:
+    build: ./backend
+    image: claude-code-proxy/backend:latest
+    container_name: claude-code-proxy-backend
+    hostname: claude-proxy-backend
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 80
+    restart: unless-stopped
+    env_file: ./.env
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.claude-code-proxy-api.rule=Host(`${DOMAIN}`) && PathPrefix(`/api`)
+      - traefik.http.routers.claude-code-proxy-api.entrypoints=websecure
+      - traefik.http.routers.claude-code-proxy-api.tls=true
+      - traefik.http.routers.claude-code-proxy-api.tls.certresolver=cloudflare
+      - traefik.http.services.claude-code-proxy-api.loadbalancer.server.port=80
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - recallrai_prod
+
+  claude-code-proxy-frontend:
+    build: ./frontend
+    image: claude-code-proxy/frontend:latest
+    container_name: claude-code-proxy-frontend
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.claude-code-proxy.rule=Host(`${DOMAIN}`)
+      - traefik.http.routers.claude-code-proxy.entrypoints=websecure
+      - traefik.http.routers.claude-code-proxy.tls=true
+      - traefik.http.routers.claude-code-proxy.tls.certresolver=cloudflare
+      - traefik.http.services.claude-code-proxy.loadbalancer.server.port=3000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - recallrai_prod
+
+networks:
+  recallrai_prod:
+    external: true
