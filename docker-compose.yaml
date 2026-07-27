@@ -1,49 +1,83 @@
 name: claude-code-proxy
 
+# Main application services only. This file is composed with the supporting stacks:
+#
+#   - docker-compose.postgres.yml  -- a bundled PostgreSQL (omit it to use your own database)
+#   - docker-compose.traefik.yml   -- a bundled Traefik reverse proxy that fronts the app on one origin
+#
+# Local / all-in-one (see README):
+#   docker compose -f docker-compose.yaml -f docker-compose.postgres.yml -f docker-compose.traefik.yml up -d --build
+#
+# These services are reached only through the reverse proxy, so none of them publish host ports directly.
+
 services:
-  claude-code-proxy-backend:
+  backend-init-db:
     build: ./backend
     image: claude-code-proxy/backend:latest
-    container_name: claude-code-proxy-backend
-    hostname: claude-proxy-backend
-    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 80
+    command: uv run python -m app.scripts.migrate
+    env_file: ./.env
+    # The dependency on Postgres is added by docker-compose.postgres.yml; with an external
+    # database this one-shot just runs the migration against POSTGRES_HOST.
+
+  backend:
+    build: ./backend
+    image: claude-code-proxy/backend:latest
+    command: uv run gunicorn app.main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:80 --log-level info
     restart: unless-stopped
     env_file: ./.env
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.claude-code-proxy-api.rule=Host(`${DOMAIN}`) && PathPrefix(`/api`)
-      - traefik.http.routers.claude-code-proxy-api.entrypoints=websecure
-      - traefik.http.routers.claude-code-proxy-api.tls=true
-      - traefik.http.routers.claude-code-proxy-api.tls.certresolver=cloudflare
-      - traefik.http.services.claude-code-proxy-api.loadbalancer.server.port=80
+    environment:
+      DEPLOYMENT_SLOT: ${BG_SLOT:-stable}
+    depends_on:
+      backend-init-db:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      - recallrai_prod
 
-  claude-code-proxy-frontend:
+  quota-refresher:
+    build: ./backend
+    image: claude-code-proxy/backend:latest
+    command: uv run python -m app.scripts.quota_refresher
+    restart: unless-stopped
+    env_file: ./.env
+    depends_on:
+      backend-init-db:
+        condition: service_completed_successfully
+
+  notification-dispatcher:
+    build: ./backend
+    image: claude-code-proxy/backend:latest
+    command: uv run python -m app.scripts.notification_dispatcher
+    restart: unless-stopped
+    env_file: ./.env
+    depends_on:
+      backend-init-db:
+        condition: service_completed_successfully
+
+  archive-retention:
+    build: ./backend
+    image: claude-code-proxy/backend:latest
+    command: uv run python -m app.scripts.archive_retention
+    restart: unless-stopped
+    env_file: ./.env
+    environment:
+      BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK: "yes"
+    volumes:
+      - type: bind
+        source: ${ARCHIVE_BORG_HOST_DIR:-/srv/claude-code-proxy/borg}
+        target: /borg
+    depends_on:
+      backend-init-db:
+        condition: service_completed_successfully
+
+  frontend:
     build: ./frontend
     image: claude-code-proxy/frontend:latest
-    container_name: claude-code-proxy-frontend
     restart: unless-stopped
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.claude-code-proxy.rule=Host(`${DOMAIN}`)
-      - traefik.http.routers.claude-code-proxy.entrypoints=websecure
-      - traefik.http.routers.claude-code-proxy.tls=true
-      - traefik.http.routers.claude-code-proxy.tls.certresolver=cloudflare
-      - traefik.http.services.claude-code-proxy.loadbalancer.server.port=3000
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/"]
       interval: 10s
       timeout: 3s
       retries: 5
-    networks:
-      - recallrai_prod
-
-networks:
-  recallrai_prod:
-    external: true
