@@ -200,7 +200,10 @@ function DualAreaTooltip({
             <div className="mt-1 space-y-0.5">
                 {series.map((s) => (
                     <div key={s.key} className="flex items-center gap-1.5">
-                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: TONE_COLOR[s.tone] }} />
+                        <span
+                            className="h-2 w-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: TONE_COLOR[s.tone] }}
+                        />
                         <span className="text-fog-300 text-[11px]">{s.label}</span>
                         <span className="text-fog-100 ml-auto font-mono text-[11px] font-semibold tabular-nums">
                             {s.format(Number(row[s.key]) || 0)}
@@ -231,9 +234,24 @@ export function DualAreaChart({
                 <AreaChart data={data} margin={{ top: 4, right: 6, bottom: 0, left: 0 }}>
                     <defs>
                         {series.map((s) => (
-                            <linearGradient key={s.key} id={`grad-dual-${s.key}`} x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor={TONE_COLOR[s.tone]} stopOpacity={0.25} />
-                                <stop offset="100%" stopColor={TONE_COLOR[s.tone]} stopOpacity={0} />
+                            <linearGradient
+                                key={s.key}
+                                id={`grad-dual-${s.key}`}
+                                x1="0"
+                                y1="0"
+                                x2="0"
+                                y2="1"
+                            >
+                                <stop
+                                    offset="0%"
+                                    stopColor={TONE_COLOR[s.tone]}
+                                    stopOpacity={0.25}
+                                />
+                                <stop
+                                    offset="100%"
+                                    stopColor={TONE_COLOR[s.tone]}
+                                    stopOpacity={0}
+                                />
                             </linearGradient>
                         ))}
                     </defs>
@@ -343,7 +361,10 @@ function StackedTooltip({
                     .filter((s) => (Number(row[s.key]) || 0) > 0)
                     .map((s) => (
                         <div key={s.key} className="flex items-center gap-1.5">
-                            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: s.color }} />
+                            <span
+                                className="h-2 w-2 shrink-0 rounded-full"
+                                style={{ backgroundColor: s.color }}
+                            />
                             <span className="text-fog-300 text-[11px]">{s.label}</span>
                             <span className="text-fog-100 ml-auto font-mono text-[11px] tabular-nums">
                                 {format(Number(row[s.key]) || 0)}
