@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { ProxyEvent, TimeRange, User } from "@/lib/types";
+import { ProxyEvent, TimeRange, UserLookup } from "@/lib/types";
 import { RangePicker } from "@/components/RangePicker";
 import { UserFilter } from "@/components/UserFilter";
 import { EventTypeFilter } from "@/components/EventTypeFilter";
@@ -47,7 +47,7 @@ function displayModel(metadata: Record<string, unknown>): string {
 }
 export default function EventsPage() {
     const [range, setRange] = useState<TimeRange>(initialRange);
-    const [users, setUsers] = useState<User[]>([]);
+    const [users, setUsers] = useState<UserLookup[]>([]);
     const [models, setModels] = useState<string[]>([]);
     const [userId, setUserId] = useState<string | null>(null);
     const [eventType, setEventType] = useState("");
@@ -95,10 +95,10 @@ export default function EventsPage() {
         }
     }, [load]);
     useEffect(() => {
-        api.users()
+        api.analyticsUsers()
             .then(setUsers)
             .catch(() => {});
-        api.userModelOptions()
+        api.analyticsModels()
             .then(setModels)
             .catch(() => {});
     }, []);
@@ -279,7 +279,22 @@ export default function EventsPage() {
                                             <td className="text-brand-300 px-3 py-3 font-medium whitespace-nowrap">
                                                 <div className="flex flex-wrap items-center gap-2">
                                                     <span>{e.event_type}</span>
-                                                    {(e.event_type === "request.received" || e.event_type === "response.returned") && e.archive_hot !== false && e.request_id?.startsWith("req_") ? <button type="button" onClick={() => setCaptureEventId(e.request_id.slice(4))} className="text-fog-300 hover:text-brand-200 rounded border border-current/30 px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase">View capture</button> : null}
+                                                    {(e.event_type === "request.received" ||
+                                                        e.event_type === "response.returned") &&
+                                                    e.archive_hot !== false &&
+                                                    e.request_id?.startsWith("req_") ? (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() =>
+                                                                setCaptureEventId(
+                                                                    e.request_id.slice(4),
+                                                                )
+                                                            }
+                                                            className="text-fog-300 hover:text-brand-200 rounded border border-current/30 px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase"
+                                                        >
+                                                            View capture
+                                                        </button>
+                                                    ) : null}
                                                 </div>
                                             </td>
                                             <td className="px-3 py-3 font-mono text-xs">
@@ -331,7 +346,12 @@ export default function EventsPage() {
                     </button>
                 </div>
             ) : null}
-            {captureEventId ? <RequestCaptureOverlay eventId={captureEventId} onClose={() => setCaptureEventId(null)} /> : null}
+            {captureEventId ? (
+                <RequestCaptureOverlay
+                    eventId={captureEventId}
+                    onClose={() => setCaptureEventId(null)}
+                />
+            ) : null}
         </main>
     );
 }
