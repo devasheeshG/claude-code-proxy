@@ -53,6 +53,14 @@ from .stats import (
     UserThinkingLevelMix,
     UserUsage,
 )
+from .team import (
+    AuthProfileResponse,
+    CreateDashboardMemberRequest,
+    DashboardMember,
+    DashboardMemberResponse,
+    ListDashboardMembersResponse,
+    UpdateDashboardMemberRequest,
+)
 from .users import (
     ApiKey,
     ApiKeyCreatedResponse,
@@ -133,4 +141,10 @@ __all__ = [
     "UpdateTelegramSettingsRequest",
     "UpdateNotificationRuleRequest",
     "TestNotificationResponse",
+    "DashboardMember",
+    "DashboardMemberResponse",
+    "ListDashboardMembersResponse",
+    "CreateDashboardMemberRequest",
+    "UpdateDashboardMemberRequest",
+    "AuthProfileResponse",
 ]
