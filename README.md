@@ -6,6 +6,9 @@ routing, concurrency control, transparent failover, per-user policies, usage
 accounting, request archives, Telegram notifications, and an operations
 dashboard.
 
+Looking for an OpenAI-compatible Codex proxy instead? See the companion
+[Codex Proxy](https://github.com/devasheeshG/codex-proxy).
+
 ![Claude Code Proxy overview](docs/screenshots/overview.png)
 
 The screenshots in this README use internally consistent synthetic data. The
