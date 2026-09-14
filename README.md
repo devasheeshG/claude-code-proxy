@@ -79,6 +79,21 @@ are the bottleneck now (pun intended).
   limits and revocation.
 - Hashed API keys and Fernet-encrypted OAuth/fallback credentials.
 
+### Team access
+
+- Create, disable, delete, and assign built-in roles to database-backed dashboard
+  members from the **Team** page. Each member card shows its effective permissions.
+- Permissions are split across analytics, archived event bodies, accounts, proxy
+  users, API keys, fallbacks, notifications, team members, and role assignment;
+  mutating areas distinguish read, write, and delete access.
+- Built-in roles cover administrators, read-only viewers, event viewers,
+  operations, accounts, users, fallbacks, notifications, and team management.
+- Authorization is enforced by the API as well as navigation visibility. Unknown
+  administrative routes fail closed for non-owner members.
+- The environment-configured root login remains the break-glass owner. The
+  dashboard deliberately does not store UI audit history or expose session
+  revocation controls.
+
 ### Deterministic model catalog
 
 Model discovery is local and deterministic, so opening Claude Code does not wait
