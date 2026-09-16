@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Check, ListChecks } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { Account, ProviderHealth } from "@/lib/types";
+import { Account, EgressTarget, ProviderHealth } from "@/lib/types";
 import { formatCountdown, formatDateTime, formatUsd, tierLabel } from "@/lib/format";
 import {
     Badge,
@@ -23,6 +23,7 @@ import {
     LoadingState,
     Modal,
     Segmented,
+    SelectMenu,
     Spinner,
     TextInput,
     UsageBar,
@@ -159,8 +160,18 @@ function compareAccountsForRotation(a: Account, b: Account): number {
     return a.id.localeCompare(b.id);
 }
 
+function egressTargetLabel(account: Account, targets: EgressTarget[]): string {
+    const target = targets.find((candidate) => candidate.id === account.egress_target_id);
+    if (!target) return "First configured path";
+    if (target.interface_name && target.private_ip) {
+        return `${target.interface_name} · ${target.private_ip}${target.public_ip ? ` → ${target.public_ip}` : ""}`;
+    }
+    return target.label;
+}
+
 export default function AccountsPage() {
     const [accounts, setAccounts] = useState<Account[] | null>(null);
+    const [egressTargets, setEgressTargets] = useState<EgressTarget[]>([]);
     const [savedPriorities, setSavedPriorities] = useState<Record<string, number>>({});
     const [draggedId, setDraggedId] = useState<string | null>(null);
     const [savingPriority, setSavingPriority] = useState(false);
@@ -197,9 +208,10 @@ export default function AccountsPage() {
         if (!background) setLoading(true);
         if (!background) setError(null);
         try {
-            const loaded = await api.accounts();
+            const [loaded, targets] = await Promise.all([api.accounts(), api.egressTargets()]);
             if (requestId !== loadRequestId.current) return;
             setAccounts(loaded);
+            setEgressTargets(targets);
             setSavedPriorities(
                 Object.fromEntries(loaded.map((account) => [account.id, account.priority])),
             );
@@ -521,6 +533,7 @@ export default function AccountsPage() {
                                                 acc.provider_health === "DEGRADED" ||
                                                 acc.provider_health === "UNKNOWN" ||
                                                 healthIsStale(acc);
+                                            const assignedEgress = egressTargetLabel(acc, egressTargets);
                                             return (
                                                 <div
                                                     key={acc.id}
@@ -611,6 +624,9 @@ export default function AccountsPage() {
                                                                         <div className="text-fog-400 mt-0.5 truncate text-xs">
                                                                             {acc.account_email ??
                                                                                 "no email on file"}
+                                                                        </div>
+                                                                        <div className="text-fog-500 mt-1 truncate text-[11px]">
+                                                                            Egress · {assignedEgress}
                                                                         </div>
                                                                         {false &&
                                                                         acc.provider_health ===
@@ -962,6 +978,7 @@ export default function AccountsPage() {
             {editTarget ? (
                 <EditAccountModal
                     account={editTarget}
+                    egressTargets={egressTargets}
                     onClose={() => setEditTarget(null)}
                     onSaved={(updated) => {
                         setEditTarget(null);
@@ -1017,10 +1034,12 @@ export default function AccountsPage() {
 
 function EditAccountModal({
     account,
+    egressTargets,
     onClose,
     onSaved,
 }: {
     account: Account;
+    egressTargets: EgressTarget[];
     onClose: () => void;
     onSaved: (account: Account) => void;
 }) {
@@ -1034,6 +1053,10 @@ function EditAccountModal({
     const [weeklyRotation, setWeeklyRotation] = useState(String(account.weekly_rotation_threshold));
     const [cooldown, setCooldown] = useState(String(account.cooldown_seconds));
     const [priority, setPriority] = useState(String(account.priority));
+    const defaultEgressTargetId = egressTargets.find((target) => target.enabled)?.id ?? "";
+    const [egressTargetId, setEgressTargetId] = useState(
+        account.egress_target_id ?? defaultEgressTargetId,
+    );
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -1049,6 +1072,7 @@ function EditAccountModal({
                 weekly_rotation_threshold: parseOptionalFloat(weeklyRotation),
                 cooldown_seconds: parseOptionalInt(cooldown),
                 priority: parseOptionalInt(priority),
+                egress_target_id: egressTargetId || defaultEgressTargetId || null,
             });
             onSaved(updated);
         } catch (err) {
@@ -1072,6 +1096,27 @@ function EditAccountModal({
                     <div className="text-fog-200 text-sm">
                         {account.account_email ?? "Email unavailable"}
                     </div>
+                </Field>
+                <Field
+                    label="Egress network path"
+                    hint="Accounts use the first configured regional path by default. Select another path to pin this account to it."
+                >
+                    <SelectMenu
+                        value={egressTargetId}
+                        onChange={setEgressTargetId}
+                        ariaLabel="Select egress network path"
+                        options={[
+                            ...egressTargets
+                                .filter((target) => target.enabled)
+                                .map((target) => ({
+                                    value: target.id,
+                                    label:
+                                        target.interface_name && target.private_ip
+                                            ? `${target.interface_name} · ${target.private_ip}${target.public_ip ? ` → ${target.public_ip}` : ""}`
+                                            : target.label,
+                                })),
+                        ]}
+                    />
                 </Field>
                 <Field
                     label="Show in Authenticated accounts"

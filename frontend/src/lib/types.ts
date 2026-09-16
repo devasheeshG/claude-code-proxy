@@ -251,6 +251,7 @@ export interface Account {
     id: string;
     label: string;
     account_email: string | null;
+    egress_target_id: string | null;
     authenticated_override: boolean;
     warmup_enabled: boolean;
     warmup_next_at: string | null;
@@ -284,6 +285,17 @@ export interface Account {
     priority: number;
     total_spend_usd: number;
     monthly_spend_usd: number;
+}
+
+export interface EgressTarget {
+    id: string;
+    label: string;
+    kind: string;
+    interface_name: string | null;
+    private_ip: string | null;
+    public_ip: string | null;
+    max_concurrency: number;
+    enabled: boolean;
 }
 
 export interface OAuthStartResponse {

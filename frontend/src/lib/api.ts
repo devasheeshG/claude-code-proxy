@@ -9,6 +9,7 @@
 
 import {
     Account,
+    EgressTarget,
     ActivityResponse,
     ApiKey,
     ApiKeyCreated,
@@ -280,6 +281,10 @@ export const api = {
         const res = await request<{ accounts: Account[] }>("/v1/accounts");
         return res.accounts;
     },
+    async egressTargets(): Promise<EgressTarget[]> {
+        const res = await request<{ targets: EgressTarget[] }>("/v1/accounts/egress-targets");
+        return res.targets;
+    },
     async bulkSetAccountPriority(accountIds: string[], priority: number): Promise<Account[]> {
         const res = await request<{ accounts: Account[] }>("/v1/accounts/priorities/bulk", {
             method: "PUT",
@@ -298,6 +303,7 @@ export const api = {
         id: string,
         patch: {
             label?: string;
+            egress_target_id?: string | null;
             authenticated_override?: boolean | null;
             warmup_enabled?: boolean | null;
             // A number sets each rotation field; null or an omitted key leaves it unchanged.
