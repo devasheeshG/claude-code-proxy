@@ -353,3 +353,22 @@ context.
 
 [AGPL-3.0](LICENSE). If you run a modified version as a network service, make
 the corresponding source available to its users.
+
+## Per-account egress IPs
+
+The proxy supports several approved public egress IPs from one EC2 instance.
+Each secondary private address is attached to the existing ENI and mapped to
+an Elastic IP. The boot helper in `ops/aws-egress/` restores those addresses;
+`docker-compose.egress.yml` runs an authenticated host-network CONNECT relay
+per source address. Backend containers use `host.docker.internal`, so no
+second gateway or public relay port is required.
+
+Configure `EGRESS_TARGETS_JSON` in the protected `.env`. In Accounts → Edit,
+the first enabled target in configuration order is the default (and all
+existing accounts are initialized to it). Selecting another target pins that
+Claude subscription account for inference, OAuth, quota refresh, and warm-up;
+there is no automatic rotation or cross-target failover. The UI shows private
+and public address metadata only. Keep the relay token secret and allowlist
+only Anthropic hosts (`api.anthropic.com`/`anthropic.com`). Verify the relay
+project, health endpoint, and a sanitized Anthropic request before serving
+traffic; deploy app changes through blue-green and keep one Traefik.

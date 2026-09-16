@@ -318,3 +318,27 @@ user labels (not secrets), backup paths, enabled optional features, and exact
 safe commands for status, logs, and future blue-green updates. State where the
 user stored the one-time key without reproducing it. List any unresolved warning
 or manual follow-up explicitly.
+
+## Approved multi-egress IP setup
+
+Before changing AWS, confirm the approved Anthropic public-IP list, region,
+instance/ENI, secondary private-IP to Elastic-IP mapping, and authorization to
+allocate addresses. The supported design is one ENI with multiple private
+addresses and one Elastic IP per address, plus the separate host-network relay
+Compose project. The boot helper restores secondary addresses after reboot;
+the relay binds each upstream connection to its configured source address.
+
+Keep relay listeners host-private, use a long random token, and allowlist only
+Anthropic destinations. In Accounts → Edit, the enabled configured targets are
+listed explicitly. An account with no assignment (or a cleared value) is
+pinned to the first enabled target in `EGRESS_TARGETS_JSON`; there is no
+automatic rotation or cross-target failover. Selecting another target strictly
+pins that account for inference, OAuth refresh, quota refresh, and warm-up.
+This is an admin account setting, not a user-controlled proxy header.
+
+Validate AWS and both Compose configurations, start and health-check the relay,
+then deploy the application only with `scripts/blue-green.sh` or
+`make deploy-blue-green`. Run the independent availability probe, verify
+`/api/accounts/egress-targets`, and perform one sanitized provider probe per
+target. Never start a second Traefik, expose relay ports, print `.env`, or
+delete a production EIP during troubleshooting.
