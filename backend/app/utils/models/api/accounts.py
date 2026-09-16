@@ -18,6 +18,7 @@ class Account(BaseModel):
     id: uuid.UUID
     label: str
     account_email: Optional[str]
+    egress_target_id: Optional[str]
     authenticated_override: bool
     tier: Optional[str]
     status: AccountStatus
@@ -56,6 +57,7 @@ class Account(BaseModel):
             id=account_db.id,
             label=account_db.label,
             account_email=account_db.account_email,
+            egress_target_id=account_db.egress_target_id,
             authenticated_override=bool(account_db.authenticated_override),
             tier=account_db.tier,
             status=account_db.status,
@@ -97,6 +99,7 @@ class UpdateAccountRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     label: Optional[str] = None
+    egress_target_id: Optional[str] = None
     authenticated_override: Optional[bool] = None
     warmup_enabled: Optional[bool] = None
     # Rotation policy. Send a value to change it; omit or null leaves it unchanged.
@@ -111,6 +114,21 @@ class UpdateAccountRequest(BaseModel):
 
 class ListAccountsResponse(BaseModel):
     accounts: List[Account]
+
+
+class EgressTargetInfo(BaseModel):
+    id: str
+    label: str
+    kind: str
+    interface_name: Optional[str] = None
+    private_ip: Optional[str] = None
+    public_ip: Optional[str] = None
+    max_concurrency: int
+    enabled: bool = True
+
+
+class ListEgressTargetsResponse(BaseModel):
+    targets: List[EgressTargetInfo]
 
 
 class ReorderAccountsRequest(BaseModel):

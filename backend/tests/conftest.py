@@ -29,6 +29,7 @@ os.environ.update(
         "ADMIN_USERNAME": "admin",
         "ADMIN_PASSWORD": TEST_ADMIN_PASSWORD,
         "DOMAIN": "localhost",
+        "EGRESS_TARGETS_JSON": "",
         # Unit tests must never connect to the operator's live MinIO archive.
         "ARCHIVE_ENABLED": "false",
     }

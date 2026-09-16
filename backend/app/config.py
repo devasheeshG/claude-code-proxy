@@ -85,6 +85,13 @@ class Settings(BaseSettings):
     DEFAULT_KEY_RATE_LIMIT_PER_MINUTE: int = 0
     MAX_CONCURRENT_REQUESTS_PER_ACCOUNT: int = DEFAULT_MAX_CONCURRENT_REQUESTS_PER_ACCOUNT
 
+    # Optional outbound paths. Each target is either a local source address or
+    # an authenticated CONNECT relay; accounts may pin to a target by ID.
+    EGRESS_TARGETS_JSON: str = ""
+    DEFAULT_EGRESS_MAX_CONCURRENCY: int = 32
+    EGRESS_RELAY_USERNAME: str = "recallr"
+    EGRESS_RELAY_TOKEN: Optional[str] = None
+
     # Exact client-facing request/response bodies go directly to S3/MinIO.
     ARCHIVE_ENABLED: bool = False
     ARCHIVE_REQUIRED: bool = True

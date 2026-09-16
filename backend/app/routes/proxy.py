@@ -21,6 +21,7 @@ from app.routes.me import build_pool_status
 from app.utils import (
     account_limiter,
     anthropic_fallbacks,
+    egress,
     events,
     notifications,
     provider_health,
@@ -449,12 +450,18 @@ def _archive_usage(request: Request, usage_obj: usage.Usage) -> None:
     )
 
 
-async def _send_with_account_limit(client, method, url, headers, content, account, priority):
-    lease = account_limiter.try_acquire(account.id, settings.MAX_CONCURRENT_REQUESTS_PER_ACCOUNT, priority)
+async def _send_with_account_limit(connection, method, url, headers, content, account, priority):
     try:
+        lease = account_limiter.try_acquire(account.id, settings.MAX_CONCURRENT_REQUESTS_PER_ACCOUNT, priority)
+    except Exception:
+        await connection.aclose()
+        raise
+    try:
+        client = connection.client
         candidate = await _prepare_candidate(await client.send(client.build_request(method, url, headers=headers, content=content), stream=True))
     except Exception:
         lease.release()
+        await connection.aclose()
         raise
     original_aclose = candidate.aclose
 
@@ -463,6 +470,7 @@ async def _send_with_account_limit(client, method, url, headers, content, accoun
             await original_aclose()
         finally:
             lease.release()
+            await connection.aclose()
 
     candidate.aclose = close_with_lease
     return candidate
@@ -618,8 +626,6 @@ async def proxy_messages(
             db.commit()
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API key monthly token budget exhausted.")
 
-    client = httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=15.0))
-
     exclude_ids = set()
     resp = None
     chosen_id = None
@@ -637,16 +643,20 @@ async def proxy_messages(
             request, "account.attempt", user_id=user_id, api_key_id=api_key_id, account_id=account.id, metadata={"priority": account.priority}
         )
 
+        connection = None
         try:
-            access_token = rotation.ensure_fresh_token(db, account)
+            connection = egress.get_pool().acquire(account.egress_target_id, priority=user.priority)
+            access_token = rotation.ensure_fresh_token(db, account, egress_target=connection.target)
             headers = _build_upstream_headers(request.headers, access_token)
             db.commit()
-            candidate = await _send_with_account_limit(client, request.method, upstream_url, headers, body, account, user.priority)
+            candidate = await _send_with_account_limit(connection, request.method, upstream_url, headers, body, account, user.priority)
+            connection = None
             if candidate.status_code == 401:
                 await candidate.aclose()
-                access_token = rotation.ensure_fresh_token(db, account, force_refresh=True)
+                connection = egress.get_pool().acquire(account.egress_target_id, priority=user.priority)
+                access_token = rotation.ensure_fresh_token(db, account, force_refresh=True, egress_target=connection.target)
                 candidate = await _send_with_account_limit(
-                    client,
+                    connection,
                     request.method,
                     upstream_url,
                     _build_upstream_headers(request.headers, access_token),
@@ -654,6 +664,7 @@ async def proxy_messages(
                     account,
                     user.priority,
                 )
+                connection = None
                 if candidate.status_code == 401:
                     await candidate.aclose()
                     provider_health.persist_failure(db, account.id, provider_health.reauthentication_error())
@@ -671,7 +682,15 @@ async def proxy_messages(
                 message="Per-account concurrency ceiling reached",
             )
             continue
+        except egress.EgressUnavailable:
+            logger.info("No egress capacity is available for pooled account %s; trying the next account", account.label)
+            if connection is not None:
+                await connection.aclose()
+            exclude_ids.add(account.id)
+            continue
         except Exception as exc:  # noqa: BLE001
+            if connection is not None:
+                await connection.aclose()
             provider_health.persist_failure(db, account.id, exc)
             exclude_ids.add(account.id)
             _emit_event(request, "account.error", user_id=user_id, api_key_id=api_key_id, account_id=account.id, message=str(exc))
@@ -753,9 +772,11 @@ async def proxy_messages(
             fallback_url = anthropic_fallbacks.endpoint(fallback, upstream_path)
             if request.url.query:
                 fallback_url = f"{fallback_url}?{request.url.query}"
+            connection = None
             try:
+                connection = egress.get_pool().acquire(None, priority=user.priority)
                 candidate = await _send_with_account_limit(
-                    client,
+                    connection,
                     request.method,
                     fallback_url,
                     _build_fallback_headers(request.headers, anthropic_fallbacks.api_key(fallback)),
@@ -763,6 +784,7 @@ async def proxy_messages(
                     fallback,
                     user.priority,
                 )
+                connection = None
             except account_limiter.AccountBusy:
                 logger.info("Fallback provider %s is at its in-flight request ceiling; trying the next provider", fallback.label)
                 fallback_excluded.add(fallback.id)
@@ -775,7 +797,12 @@ async def proxy_messages(
                     message="Per-provider concurrency ceiling reached",
                 )
                 continue
+            except egress.EgressUnavailable:
+                fallback_excluded.add(fallback.id)
+                continue
             except Exception as exc:  # noqa: BLE001
+                if connection is not None:
+                    await connection.aclose()
                 anthropic_fallbacks.mark_cooldown(fallback, 60, f"Request failed: {exc}")
                 db.commit()
                 fallback_excluded.add(fallback.id)
@@ -891,7 +918,6 @@ async def proxy_messages(
     if resp.status_code >= 400 or "text/event-stream" not in content_type:
         raw = await resp.aread()
         await resp.aclose()
-        await client.aclose()
         raw = _restore_requested_model_in_error(raw, resp.status_code, requested_model, request_model)
 
         if not is_count_tokens:
@@ -933,7 +959,6 @@ async def proxy_messages(
                 yield chunk
         finally:
             await resp.aclose()
-            await client.aclose()
             captured_usage = accumulator.result()
             _archive_usage(request, captured_usage)
             _record_usage_safe(

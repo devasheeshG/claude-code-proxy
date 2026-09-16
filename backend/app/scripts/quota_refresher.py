@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from app import config
 from app.logger import configure_logging, get_logger
-from app.utils import notifications, oauth, provider_health, rotation
+from app.utils import egress, notifications, oauth, provider_health, rotation
 from app.utils.models.api import ProviderHealth as ProviderHealthEnum
 from app.utils.postgres import AccountDb, get_db_cm
 
@@ -29,11 +29,15 @@ def refresh_once() -> None:
             if account.provider_health == ProviderHealthEnum.REAUTH_REQUIRED:
                 continue
             try:
-                access_token = rotation.ensure_fresh_token(db, account)
-                limit_reached = rotation.apply_usage_probe(account, oauth.fetch_usage(access_token))
+                target = egress.get_pool().resolve(account.egress_target_id)
+                access_token = rotation.ensure_fresh_token(db, account, egress_target=target)
+                limit_reached = rotation.apply_usage_probe(
+                    account,
+                    oauth.fetch_usage(access_token, egress_target=target),
+                )
                 provider_health.mark_success(account)
                 try:
-                    profile = oauth.fetch_profile(access_token)
+                    profile = oauth.fetch_profile(access_token, egress_target=target)
                     account.tier = oauth.extract_tier(profile) or account.tier
                     account.account_email = oauth.extract_email(profile) or account.account_email
                 except Exception:  # noqa: BLE001

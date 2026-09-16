@@ -165,7 +165,13 @@ def select_account(
     return chosen
 
 
-def ensure_fresh_token(db: Session, account: AccountDb, *, force_refresh: bool = False) -> str:
+def ensure_fresh_token(
+    db: Session,
+    account: AccountDb,
+    *,
+    force_refresh: bool = False,
+    egress_target=None,
+) -> str:
     """Return a usable access token, serializing refresh-token rotation in the database.
 
     ``force_refresh`` is used after an upstream 401.  The provider can revoke an
@@ -202,7 +208,8 @@ def ensure_fresh_token(db: Session, account: AccountDb, *, force_refresh: bool =
 
     try:
         refresh_plain = crypto.decrypt(locked.refresh_token_enc)
-        tokens = oauth.refresh_access_token(refresh_plain)
+        refresh_kwargs = {"egress_target": egress_target} if egress_target is not None else {}
+        tokens = oauth.refresh_access_token(refresh_plain, **refresh_kwargs)
     except Exception as exc:
         health = provider_health.persist_failure(db, account.id, exc, context="token_refresh")
         if health == ProviderHealth.REAUTH_REQUIRED:

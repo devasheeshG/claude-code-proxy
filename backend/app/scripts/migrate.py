@@ -5,12 +5,13 @@ from alembic.config import Config
 from sqlalchemy import inspect, text
 
 from alembic import command
+from app.utils import egress
 from app.utils.postgres import AnthropicFallbackDb, ProxyEventDb
 from app.utils.postgres.base import engine, init_database
 
 CANONICAL_REVISION = "001"
 LEGACY_EQUIVALENT_HEADS = frozenset({"0011", "002", "003", "004", "005"})
-KNOWN_CHAIN_REVISIONS = frozenset({"001", "007", "008", "009"})
+KNOWN_CHAIN_REVISIONS = frozenset({"001", "007", "008", "009", "010"})
 
 
 def normalize_legacy_head() -> None:
@@ -72,6 +73,20 @@ def sync_canonical_schema() -> None:
         for column_name, column_type in warmup_columns.items():
             if column_name not in account_columns:
                 connection.execute(text(f"ALTER TABLE accounts ADD COLUMN {column_name} {column_type}"))
+
+        # Automatic egress rotation is intentionally disabled. Persist the
+        # first enabled configured target for every account so restored or
+        # upgraded databases have the same deterministic assignment as new
+        # accounts and request-time fallback.
+        inspector = inspect(connection)
+        account_columns = {column["name"] for column in inspector.get_columns("accounts")}
+        if "egress_target_id" not in account_columns:
+            connection.execute(text("ALTER TABLE accounts ADD COLUMN egress_target_id VARCHAR(128)"))
+        default_egress_target = egress.get_pool().default_target().id
+        connection.execute(
+            text("UPDATE accounts SET egress_target_id = :target_id"),
+            {"target_id": default_egress_target},
+        )
 
         user_columns = {column["name"] for column in inspector.get_columns("users")}
         user_additions = {

@@ -33,6 +33,7 @@ class AccountDb(DatabaseBase):
     id = Column(UUID(as_uuid=True), nullable=False)
     label = Column(VARCHAR, nullable=False)
     account_email = Column(VARCHAR, nullable=True)
+    egress_target_id = Column(VARCHAR(128), nullable=True)
     authenticated_override = Column(Boolean, nullable=False, default=False, server_default="false")
     tier = Column(VARCHAR, nullable=True)  # raw subscription tier, e.g. "default_claude_max_5x"
     access_token_enc = Column(Text, nullable=False)

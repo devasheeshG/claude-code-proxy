@@ -10,13 +10,15 @@ from sqlalchemy.orm import Session
 
 from app import config
 from app.logger import get_logger
-from app.utils import crypto, notifications, oauth, provider_health, rotation, security, usage, warmup
+from app.utils import crypto, egress, notifications, oauth, provider_health, rotation, security, usage, warmup
 from app.utils.models.api import (
     Account,
     AccountResponse,
     AccountStatus,
     BulkAccountPriorityRequest,
+    EgressTargetInfo,
     ListAccountsResponse,
+    ListEgressTargetsResponse,
     OAuthCompleteRequest,
     OAuthStartResponse,
     ReauthCompleteRequest,
@@ -29,6 +31,18 @@ from app.utils.postgres import AccountDb, UsageRecordDb, get_db
 logger = get_logger()
 
 router = APIRouter(tags=["Accounts"], prefix="/accounts")
+
+
+@router.get("/egress-targets", response_model=ListEgressTargetsResponse)
+def list_egress_targets(
+    _: str = Depends(security.require_admin),  # noqa: B008
+) -> ListEgressTargetsResponse:
+    """List safe outbound-path metadata for the account selector."""
+    return ListEgressTargetsResponse(targets=[EgressTargetInfo(**target.public_dict()) for target in egress.get_pool().targets()])
+
+
+def _account_egress_target(account: AccountDb) -> egress.EgressTarget:
+    return egress.get_pool().resolve(account.egress_target_id)
 
 
 def _next_priority(db: Session) -> int:
@@ -160,7 +174,8 @@ def complete_oauth(
 ) -> AccountResponse:
     """Finish adding an account from the pasted `code#state` value, enriching email and quota best-effort."""
     try:
-        tokens = oauth.exchange_code(request.code, request.verifier)
+        target = egress.get_pool().resolve(None)
+        tokens = oauth.exchange_code(request.code, request.verifier, egress_target=target)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"OAuth token exchange failed: {exc}") from exc
 
@@ -170,7 +185,7 @@ def complete_oauth(
     email = None
     tier = None
     try:
-        profile = oauth.fetch_profile(access_token)
+        profile = oauth.fetch_profile(access_token, egress_target=target)
         email = oauth.extract_email(profile)
         tier = oauth.extract_tier(profile)
     except Exception:  # noqa: BLE001
@@ -191,6 +206,7 @@ def complete_oauth(
         rotation_threshold=config.DEFAULT_ROTATION_THRESHOLD,
         cooldown_seconds=config.DEFAULT_COOLDOWN_SECONDS,
         max_failover_attempts=config.DEFAULT_MAX_FAILOVER_ATTEMPTS,
+        egress_target_id=target.id,
         priority=_next_priority(db),
         created_at=now,
         updated_at=now,
@@ -198,7 +214,7 @@ def complete_oauth(
 
     limit_reached = False
     try:
-        limit_reached = rotation.apply_usage_probe(account, oauth.fetch_usage(access_token))
+        limit_reached = rotation.apply_usage_probe(account, oauth.fetch_usage(access_token, egress_target=target))
         provider_health.mark_success(account)
     except Exception as exc:  # noqa: BLE001
         provider_health.mark_failure(account, exc)
@@ -247,7 +263,8 @@ def reauth_account(
     rotation.normalize_expired_cooldown(account)
 
     try:
-        tokens = oauth.exchange_code(request.code, request.verifier)
+        target = _account_egress_target(account)
+        tokens = oauth.exchange_code(request.code, request.verifier, egress_target=target)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"OAuth token exchange failed: {exc}") from exc
 
@@ -265,7 +282,7 @@ def reauth_account(
 
     # Best-effort refresh of email + tier from the new token's profile.
     try:
-        profile = oauth.fetch_profile(access_token)
+        profile = oauth.fetch_profile(access_token, egress_target=target)
         account.account_email = oauth.extract_email(profile) or account.account_email
         account.tier = oauth.extract_tier(profile) or account.tier
     except Exception:  # noqa: BLE001
@@ -273,7 +290,7 @@ def reauth_account(
 
     limit_reached = False
     try:
-        limit_reached = rotation.apply_usage_probe(account, oauth.fetch_usage(access_token))
+        limit_reached = rotation.apply_usage_probe(account, oauth.fetch_usage(access_token, egress_target=target))
         provider_health.mark_success(account)
     except Exception as exc:  # noqa: BLE001
         provider_health.mark_failure(account, exc)
@@ -313,6 +330,18 @@ def update_account(
     if request.label is not None:
         label = request.label.strip()
         account.label = label
+
+    pool = egress.get_pool()
+    if "egress_target_id" in request.model_fields_set:
+        target_id = request.egress_target_id.strip() if request.egress_target_id else pool.default_target().id
+        if not pool.has_target(target_id):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Egress target '{target_id}' is not configured or enabled",
+            )
+        account.egress_target_id = target_id
+    elif account.egress_target_id is None:
+        account.egress_target_id = pool.default_target().id
 
     # Rotation policy: apply each value the client actually sent. These columns are NOT NULL, so a null/omitted
     # field leaves the current value untouched rather than clearing it.
@@ -373,7 +402,8 @@ def refresh_quota(
     # probe, so guard it separately -- otherwise the upstream OAuth rejection escapes as a raw 500 instead of an
     # actionable message. The remedy is the account's "Re-authenticate" action.
     try:
-        access_token = rotation.ensure_fresh_token(db, account)
+        target = _account_egress_target(account)
+        access_token = rotation.ensure_fresh_token(db, account, egress_target=target)
     except provider_health.ProviderReauthenticationRequired as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
@@ -381,7 +411,7 @@ def refresh_quota(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Token refresh failed temporarily.") from exc
 
     try:
-        rotation.apply_usage_probe(account, oauth.fetch_usage(access_token))
+        rotation.apply_usage_probe(account, oauth.fetch_usage(access_token, egress_target=target))
         provider_health.mark_success(account)
     except oauth.httpx.HTTPStatusError as exc:
         provider_health.persist_failure(db, account.id, exc)
@@ -401,7 +431,7 @@ def refresh_quota(
 
     # Refresh email + subscription tier too (best-effort; never fail the quota refresh over it).
     try:
-        profile = oauth.fetch_profile(access_token)
+        profile = oauth.fetch_profile(access_token, egress_target=target)
         account.tier = oauth.extract_tier(profile) or account.tier
         account.account_email = oauth.extract_email(profile) or account.account_email
     except Exception:  # noqa: BLE001

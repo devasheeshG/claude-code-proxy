@@ -4,7 +4,9 @@
 from .accounts import (
     Account,
     AccountResponse,
+    EgressTargetInfo,
     ListAccountsResponse,
+    ListEgressTargetsResponse,
     OAuthCompleteRequest,
     OAuthStartResponse,
     ReauthCompleteRequest,
@@ -94,6 +96,8 @@ __all__ = [
     "Account",
     "AccountResponse",
     "BulkAccountPriorityRequest",
+    "EgressTargetInfo",
+    "ListEgressTargetsResponse",
     "ListAccountsResponse",
     "OAuthStartResponse",
     "OAuthCompleteRequest",

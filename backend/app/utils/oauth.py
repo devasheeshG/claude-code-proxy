@@ -11,6 +11,7 @@ from typing import Dict, Optional, Tuple
 import httpx
 
 from app import config
+from app.utils import egress
 
 # The upstream usage endpoint rate-limits aggressively and its 429s are transient -- they do NOT mean the account is
 # out of quota (inference keeps working). Retry a few times with short backoff so a single stale 429 doesn't surface
@@ -63,7 +64,12 @@ def _outbound_headers() -> Dict[str, str]:
     return {"Content-Type": "application/json", "User-Agent": config.CLAUDE_CODE_USER_AGENT}
 
 
-def exchange_code(pasted_code: str, verifier: str) -> Dict:
+def exchange_code(
+    pasted_code: str,
+    verifier: str,
+    *,
+    egress_target: egress.EgressTarget | None = None,
+) -> Dict:
     """Exchange the pasted `code#state` for tokens. Returns {"access_token", "refresh_token", "expires_at"}."""
     splits = pasted_code.strip().split("#")
     code = splits[0]
@@ -78,7 +84,7 @@ def exchange_code(pasted_code: str, verifier: str) -> Dict:
         "code_verifier": verifier,
     }
 
-    with httpx.Client(timeout=30.0) as client:
+    with egress.sync_client(egress_target, timeout=30.0) if egress_target else httpx.Client(timeout=30.0) as client:
         resp = client.post(config.OAUTH_TOKEN_URL, json=body, headers=_outbound_headers())
         resp.raise_for_status()
         data = resp.json()
@@ -90,7 +96,11 @@ def exchange_code(pasted_code: str, verifier: str) -> Dict:
     }
 
 
-def refresh_access_token(refresh_token: str) -> Dict:
+def refresh_access_token(
+    refresh_token: str,
+    *,
+    egress_target: egress.EgressTarget | None = None,
+) -> Dict:
     """Refresh an access token. Keeps the old refresh token if the response omits a new one."""
     body = {
         "grant_type": "refresh_token",
@@ -98,7 +108,7 @@ def refresh_access_token(refresh_token: str) -> Dict:
         "client_id": config.OAUTH_CLIENT_ID,
     }
 
-    with httpx.Client(timeout=30.0) as client:
+    with egress.sync_client(egress_target, timeout=30.0) if egress_target else httpx.Client(timeout=30.0) as client:
         resp = client.post(config.OAUTH_TOKEN_URL, json=body, headers=_outbound_headers())
         resp.raise_for_status()
         data = resp.json()
@@ -119,9 +129,9 @@ def _bearer_headers(access_token: str) -> Dict[str, str]:
     }
 
 
-def fetch_profile(access_token: str) -> Dict:
+def fetch_profile(access_token: str, *, egress_target: egress.EgressTarget | None = None) -> Dict:
     """Fetch the account profile (email / org / subscription tier) -- best effort, display only."""
-    with httpx.Client(timeout=15.0) as client:
+    with egress.sync_client(egress_target, timeout=15.0) if egress_target else httpx.Client(timeout=15.0) as client:
         resp = client.get(config.OAUTH_PROFILE_URL, headers=_bearer_headers(access_token))
         resp.raise_for_status()
         return resp.json()
@@ -217,13 +227,13 @@ def _probe_retry_delay(resp: httpx.Response, prior_attempts: int) -> float:
     return min(backoff, _USAGE_PROBE_MAX_SLEEP)
 
 
-def fetch_usage(access_token: str) -> Dict:
+def fetch_usage(access_token: str, *, egress_target: egress.EgressTarget | None = None) -> Dict:
     """Zero-spend quota probe. Returns normalized {"five_hour", "seven_day"} utilization buckets.
 
     The upstream usage endpoint rate-limits aggressively and its 429s are transient (they do not reflect real quota
     exhaustion), so transient 429/5xx responses are retried with short backoff before giving up.
     """
-    with httpx.Client(timeout=15.0) as client:
+    with egress.sync_client(egress_target, timeout=15.0) if egress_target else httpx.Client(timeout=15.0) as client:
         for attempt in range(USAGE_PROBE_ATTEMPTS):
             resp = client.get(config.OAUTH_USAGE_URL, headers=_bearer_headers(access_token))
             if resp.status_code in _RETRYABLE_PROBE_STATUSES and attempt + 1 < USAGE_PROBE_ATTEMPTS:
