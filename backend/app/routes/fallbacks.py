@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.utils import anthropic_fallbacks, crypto, security
+from app.utils import anthropic_fallbacks, crypto, egress, security
 from app.utils.models.api import (
     AccountStatus,
     AnthropicFallbackResponse,
@@ -59,6 +59,9 @@ def create_fallback(
     now = datetime.now(timezone.utc)
     base_url = anthropic_fallbacks.normalize_base_url(request.base_url)
     raw_key = request.api_key.strip()
+    target_id = request.egress_target_id or egress.get_pool().default_target().id
+    if not egress.get_pool().has_target(target_id):
+        raise HTTPException(status_code=422, detail=f"Egress target '{target_id}' is not configured or enabled")
     provider = AnthropicFallbackDb(
         id=uuid.uuid4(),
         label=_clean_label(request.label),
@@ -69,6 +72,7 @@ def create_fallback(
         status=AccountStatus.ACTIVE,
         provider_health=ProviderHealth.UNKNOWN,
         priority=request.priority,
+        egress_target_id=target_id,
         monthly_spend_limit_usd=request.monthly_spend_limit_usd,
         created_at=now,
         updated_at=now,
@@ -107,6 +111,14 @@ def update_fallback(
         provider.monthly_spend_limit_usd = request.monthly_spend_limit_usd
     if request.priority is not None:
         provider.priority = request.priority
+    pool = egress.get_pool()
+    if "egress_target_id" in request.model_fields_set:
+        target_id = request.egress_target_id or pool.default_target().id
+        if not pool.has_target(target_id):
+            raise HTTPException(status_code=422, detail=f"Egress target '{target_id}' is not configured or enabled")
+        provider.egress_target_id = target_id
+    elif provider.egress_target_id is None:
+        provider.egress_target_id = pool.default_target().id
     if changed_credentials:
         provider.provider_health = ProviderHealth.UNKNOWN
         provider.provider_health_message = None
@@ -161,14 +173,15 @@ def test_fallback(
 ) -> AnthropicFallbackResponse:
     provider = _provider_or_404(db, provider_id)
     try:
-        response = httpx.get(
-            anthropic_fallbacks.endpoint(provider, "/v1/models"),
-            headers={
-                "x-api-key": anthropic_fallbacks.api_key(provider),
-                "anthropic-version": "2023-06-01",
-            },
-            timeout=30.0,
-        )
+        target = egress.get_pool().resolve(provider.egress_target_id)
+        with egress.sync_client(target, 30.0) as client:
+            response = client.get(
+                anthropic_fallbacks.endpoint(provider, "/v1/models"),
+                headers={
+                    "x-api-key": anthropic_fallbacks.api_key(provider),
+                    "anthropic-version": "2023-06-01",
+                },
+            )
         if response.status_code in {401, 403}:
             anthropic_fallbacks.mark_invalid(provider, f"Credential rejected with HTTP {response.status_code}.")
         elif response.is_success:

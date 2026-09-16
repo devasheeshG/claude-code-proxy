@@ -316,6 +316,7 @@ export interface AnthropicFallback {
     provider_health_checked_at: string | null;
     cooldown_until: string | null;
     priority: number;
+    egress_target_id: string | null;
     monthly_spend_limit_usd: number | null;
     monthly_spend_usd: number;
     monthly_spend_remaining_usd: number | null;

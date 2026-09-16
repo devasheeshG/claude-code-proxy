@@ -11,7 +11,7 @@ from app.utils.postgres.base import engine, init_database
 
 CANONICAL_REVISION = "001"
 LEGACY_EQUIVALENT_HEADS = frozenset({"0011", "002", "003", "004", "005"})
-KNOWN_CHAIN_REVISIONS = frozenset({"001", "007", "008", "009", "010"})
+KNOWN_CHAIN_REVISIONS = frozenset({"001", "007", "008", "009", "010", "011"})
 
 
 def normalize_legacy_head() -> None:
@@ -104,6 +104,15 @@ def sync_canonical_schema() -> None:
         # Reconcile fallback routing additions without inventing a second
         # migration history.
         AnthropicFallbackDb.__table__.create(connection, checkfirst=True)
+        inspector = inspect(connection)
+        fallback_columns = {column["name"] for column in inspector.get_columns("anthropic_fallbacks")}
+        if "egress_target_id" not in fallback_columns:
+            connection.execute(text("ALTER TABLE anthropic_fallbacks ADD COLUMN egress_target_id VARCHAR(128)"))
+        default_egress_target = egress.get_pool().default_target().id
+        connection.execute(
+            text("UPDATE anthropic_fallbacks SET egress_target_id = :target_id"),
+            {"target_id": default_egress_target},
+        )
         inspector = inspect(connection)
         usage_columns = {column["name"] for column in inspector.get_columns("usage_records")}
         if "fallback_provider_id" not in usage_columns:

@@ -362,6 +362,7 @@ export const api = {
         api_key: string;
         monthly_spend_limit_usd: number | null;
         priority: number;
+        egress_target_id?: string | null;
     }): Promise<AnthropicFallback> {
         const res = await request<{ fallback: AnthropicFallback }>("/v1/fallbacks", {
             method: "POST",
@@ -378,6 +379,7 @@ export const api = {
             monthly_spend_limit_usd?: number;
             clear_monthly_spend_limit?: boolean;
             priority?: number;
+            egress_target_id?: string | null;
         },
     ): Promise<AnthropicFallback> {
         const res = await request<{ fallback: AnthropicFallback }>(`/v1/fallbacks/${id}`, {

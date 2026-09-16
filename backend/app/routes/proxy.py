@@ -774,7 +774,7 @@ async def proxy_messages(
                 fallback_url = f"{fallback_url}?{request.url.query}"
             connection = None
             try:
-                connection = egress.get_pool().acquire(None, priority=user.priority)
+                connection = egress.get_pool().acquire(fallback.egress_target_id, priority=user.priority)
                 candidate = await _send_with_account_limit(
                     connection,
                     request.method,
