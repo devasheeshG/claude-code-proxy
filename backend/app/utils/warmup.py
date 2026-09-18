@@ -126,6 +126,11 @@ def _send(account: AccountDb, access_token: str, egress_target: egress.EgressTar
         if response.status_code == 401:
             raise provider_health.ProviderReauthenticationRequired("Authentication is no longer valid. Re-authenticate this account to restore it.")
         response.raise_for_status()
+        lowered = response.content.decode(errors="replace").lower()
+        # Anthropic-compatible gateways may encode an error in an HTTP 200
+        # body. A warm-up is healthy only when it contains a real message.
+        if ('"type":"error"' in lowered or '"type": "error"' in lowered) and '"type":"message"' not in lowered:
+            raise WarmupFailed("The provider returned an error warm-up response.")
         return response
     finally:
         client.close()

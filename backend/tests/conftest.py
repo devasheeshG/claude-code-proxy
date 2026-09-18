@@ -30,8 +30,13 @@ os.environ.update(
         "ADMIN_PASSWORD": TEST_ADMIN_PASSWORD,
         "DOMAIN": "localhost",
         "EGRESS_TARGETS_JSON": "",
+        "POOL_WAIT_TIMEOUT_SECONDS": "0",
         # Unit tests must never connect to the operator's live MinIO archive.
         "ARCHIVE_ENABLED": "false",
+        # Exercise warm-up behavior explicitly; production defaults it off to
+        # avoid synthetic requests consuming provider quota during incidents.
+        "WARMUP_ENABLED": "true",
+        "FALLBACK_GENERATION_CANARY_ENABLED": "false",
     }
 )
 

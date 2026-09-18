@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app import config
 from app.utils import anthropic_fallbacks, crypto, egress, security
 from app.utils.models.api import (
     AccountStatus,
@@ -23,6 +24,7 @@ from app.utils.models.api import (
 from app.utils.postgres import AnthropicFallbackDb, UsageRecordDb, get_db
 
 router = APIRouter(tags=["Anthropic fallbacks"], prefix="/fallbacks")
+settings = config.get_settings()
 
 
 def _provider_or_404(db: Session, provider_id: uuid.UUID) -> AnthropicFallbackDb:
@@ -189,7 +191,33 @@ def test_fallback(
             if isinstance(models, list):
                 provider.model_catalog_json = json.dumps(models, separators=(",", ":"))
                 provider.model_catalog_refreshed_at = datetime.now(timezone.utc)
-            anthropic_fallbacks.mark_healthy(provider)
+            if settings.FALLBACK_GENERATION_CANARY_ENABLED:
+                model = next((item.get("id") for item in models or [] if isinstance(item, dict) and item.get("id")), None)
+                if not model:
+                    anthropic_fallbacks.mark_cooldown(provider, 60, "Health check returned no generation-capable model.")
+                else:
+                    with egress.sync_client(target, 30.0) as client:
+                        canary = client.post(
+                            anthropic_fallbacks.endpoint(provider, "/v1/messages"),
+                            headers={
+                                "x-api-key": anthropic_fallbacks.api_key(provider),
+                                "anthropic-version": "2023-06-01",
+                                "content-type": "application/json",
+                            },
+                            json={
+                                "model": model,
+                                "max_tokens": settings.FALLBACK_CANARY_MAX_OUTPUT_TOKENS,
+                                "messages": [{"role": "user", "content": "ping"}],
+                            },
+                        )
+                    if canary.is_success:
+                        anthropic_fallbacks.mark_healthy(provider)
+                    elif canary.status_code in {401, 403}:
+                        anthropic_fallbacks.mark_invalid(provider, f"Generation canary rejected with HTTP {canary.status_code}.")
+                    else:
+                        anthropic_fallbacks.mark_cooldown(provider, 60, f"Generation canary returned HTTP {canary.status_code}.")
+            else:
+                anthropic_fallbacks.mark_healthy(provider)
         else:
             anthropic_fallbacks.mark_cooldown(provider, 60, f"Health check returned HTTP {response.status_code}.")
     except Exception as exc:  # noqa: BLE001

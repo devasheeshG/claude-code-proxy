@@ -13,6 +13,7 @@ from typing import Dict, Mapping, Optional
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import Response, StreamingResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app import config
@@ -32,7 +33,8 @@ from app.utils import (
     usage,
     warmup,
 )
-from app.utils.postgres import AccountDb, AnthropicFallbackDb, ApiKeyDb, UsageRecordDb, UserDb, get_db, get_db_cm
+from app.utils.models.api import AccountStatus, ProviderHealth
+from app.utils.postgres import AccountDb, AnthropicFallbackDb, ApiKeyDb, ProxyEventDb, UserDb, get_db, get_db_cm
 from app.utils.thinking import thinking_level_from_request
 
 # Get the logger
@@ -72,6 +74,20 @@ def _emit_event(
             message=message,
             metadata=merged_metadata,
         )
+
+
+def _upstream_diagnostics(candidate: httpx.Response, *, stream_started: bool = False, terminal_event: str | None = None) -> dict:
+    headers = {key.lower(): value for key, value in candidate.headers.items()}
+    target = candidate.extensions.get("proxy_egress_target")
+    return {
+        "upstream_status": candidate.status_code,
+        "provider_request_id": headers.get("x-request-id") or headers.get("request-id") or headers.get("anthropic-request-id"),
+        "retry_after": headers.get("retry-after") or headers.get("x-ratelimit-reset"),
+        "egress_target_id": getattr(target, "id", None),
+        "egress_public_ip": getattr(target, "public_ip", None),
+        "stream_started": stream_started,
+        "stream_terminal_event": terminal_event,
+    }
 
 
 # Request headers we must never forward upstream.
@@ -199,6 +215,8 @@ async def _is_capacity_unavailable(candidate: httpx.Response) -> bool:
         return True
     if candidate.status_code not in {400, 403, 404, 409, 429, 500, 502, 503, 529}:
         return False
+    # Keep the consumed body available to the quota parser below.  A response
+    # body must only be read once when deciding whether a 429 is authoritative.
     body = (await candidate.aread()).decode(errors="replace").lower()
     clear_phrase = any(
         phrase in body
@@ -215,16 +233,21 @@ async def _is_capacity_unavailable(candidate: httpx.Response) -> bool:
 class _PrefetchedResponse:
     """Small response proxy that replays bytes consumed while checking an SSE error prefix."""
 
-    def __init__(self, response: httpx.Response, prefix: bytes, iterator, capacity_error: bool) -> None:
+    def __init__(self, response: httpx.Response, prefix: bytes, iterator, capacity_error: bool, pre_output_failure: bool = False) -> None:
         self._response = response
         self._prefix = prefix
         self._iterator = iterator
         self._capacity_error = capacity_error
+        self._pre_output_failure = pre_output_failure
         self._body: Optional[bytes] = None
 
     @property
     def _proxy_capacity_error(self) -> bool:
         return self._capacity_error
+
+    @property
+    def _proxy_pre_output_failure(self) -> bool:
+        return self._pre_output_failure
 
     def __getattr__(self, name):
         return getattr(self._response, name)
@@ -284,6 +307,58 @@ def _is_pre_output_failure(lowered: str) -> bool:
     return has_failed and not has_output
 
 
+def _is_provider_error_frame(frame: bytes) -> bool:
+    """Suppress Anthropic error/capacity frames, including midstream failures."""
+    lowered = frame.decode(errors="replace").lower()
+    has_error = any(marker in lowered for marker in _FAIL_MARKERS)
+    has_output = any(marker in lowered for marker in _OUTPUT_DELTA_MARKERS)
+    return (has_error and not has_output) or any(phrase in lowered for phrase in _CAPACITY_PHRASES)
+
+
+_SYNTHETIC_MESSAGE_STOP = b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+
+
+def _sanitize_sse_payload(raw: bytes) -> bytes:
+    """Remove provider failure frames and terminate a buffered stream cleanly."""
+    output = bytearray()
+    remaining = raw
+    while remaining:
+        match = re.search(br"\r?\n\r?\n", remaining)
+        if match is None:
+            if not _is_provider_error_frame(remaining):
+                output.extend(remaining)
+            break
+        end = match.end()
+        frame = remaining[: match.start()]
+        if _is_provider_error_frame(frame):
+            output.extend(_SYNTHETIC_MESSAGE_STOP)
+            return bytes(output)
+        output.extend(remaining[:end])
+        remaining = remaining[end:]
+    return bytes(output)
+
+
+async def _iter_sanitized_sse(response: httpx.Response):
+    """Stream SSE frames without ever forwarding provider error events."""
+    buffer = bytearray()
+    async for chunk in response.aiter_bytes():
+        buffer.extend(chunk)
+        while True:
+            match = re.search(br"\r?\n\r?\n", buffer)
+            if match is None:
+                break
+            end = match.end()
+            frame = bytes(buffer[: match.start()])
+            separator = match.group(0)
+            del buffer[:end]
+            if _is_provider_error_frame(frame):
+                yield _SYNTHETIC_MESSAGE_STOP
+                return
+            yield bytes(frame) + separator
+    if buffer and not _is_provider_error_frame(bytes(buffer)):
+        yield bytes(buffer)
+
+
 async def _empty_aiter():
     """Yield nothing -- used as the remaining-bytes iterator for fully-read responses."""
     return
@@ -327,24 +402,28 @@ async def _prepare_candidate(candidate: httpx.Response):
         if raw.lstrip().startswith((b"event:", b"data:")):
             is_sse = True
         else:
-            candidate.extensions["proxy_capacity_error"] = any(p in lowered for p in _CAPACITY_PHRASES) or _is_pre_output_failure(lowered)
+            candidate.extensions["proxy_capacity_error"] = any(p in lowered for p in _CAPACITY_PHRASES)
+            candidate.extensions["proxy_pre_output_failure"] = _is_pre_output_failure(lowered)
             return candidate
 
     if is_sse and hasattr(candidate, "_content") and candidate._content:
         lowered = candidate._content.decode(errors="replace").lower()
-        is_capacity_error = any(p in lowered for p in _CAPACITY_PHRASES) or _is_pre_output_failure(lowered)
+        is_capacity_error = any(p in lowered for p in _CAPACITY_PHRASES)
+        is_pre_output_failure = _is_pre_output_failure(lowered)
         if is_capacity_error:
             return _PrefetchedResponse(
                 candidate,
                 candidate._content,
                 _empty_aiter(),
                 True,
+                is_pre_output_failure,
             )
         return _PrefetchedResponse(
             candidate,
             candidate._content,
             _empty_aiter(),
             False,
+            is_pre_output_failure,
         )
 
     iterator = candidate.aiter_bytes().__aiter__()
@@ -356,7 +435,7 @@ async def _prepare_candidate(candidate: httpx.Response):
         elapsed = asyncio.get_event_loop().time()
         if elapsed >= prefetch_deadline:
             logger.warning("Upstream produced no output before the SSE prefetch deadline; treating as capacity unavailable")
-            return _PrefetchedResponse(candidate, bytes(prefix), iterator, True)
+            return _PrefetchedResponse(candidate, bytes(prefix), iterator, False, True)
         remaining = max(1, prefetch_deadline - elapsed)
         try:
             timeout = min(
@@ -371,7 +450,7 @@ async def _prepare_candidate(candidate: httpx.Response):
             break
         except (asyncio.TimeoutError, TimeoutError):
             logger.warning("Upstream produced no output within the SSE prefetch timeout; treating as capacity unavailable")
-            return _PrefetchedResponse(candidate, bytes(prefix), iterator, True)
+            return _PrefetchedResponse(candidate, bytes(prefix), iterator, False, True)
         prefix.extend(chunk)
         lowered = bytes(prefix).decode(errors="replace").lower()
 
@@ -382,6 +461,7 @@ async def _prepare_candidate(candidate: httpx.Response):
                 bytes(prefix),
                 iterator,
                 True,
+                _is_pre_output_failure(lowered),
             )
 
         has_output = any(m in lowered for m in _OUTPUT_DELTA_MARKERS)
@@ -389,16 +469,16 @@ async def _prepare_candidate(candidate: httpx.Response):
 
         # Real output is flowing -> response is healthy, start streaming.
         if has_output or completed:
-            return _PrefetchedResponse(candidate, bytes(prefix), iterator, False)
+            return _PrefetchedResponse(candidate, bytes(prefix), iterator, False, False)
 
         # Nothing has reached the client yet, so a terminal upstream failure is
         # safe to retry on another account. The caller applies the short cooldown
         # that prevents every concurrent request from piling onto this account.
         if _is_pre_output_failure(lowered):
-            return _PrefetchedResponse(candidate, bytes(prefix), iterator, True)
+            return _PrefetchedResponse(candidate, bytes(prefix), iterator, False, True)
 
     logger.warning("Upstream filled the SSE prefetch buffer without producing output; treating as capacity unavailable")
-    return _PrefetchedResponse(candidate, bytes(prefix), iterator, True)
+    return _PrefetchedResponse(candidate, bytes(prefix), iterator, False, True)
 
 
 def _record_usage_safe(
@@ -450,9 +530,9 @@ def _archive_usage(request: Request, usage_obj: usage.Usage) -> None:
     )
 
 
-async def _send_with_account_limit(connection, method, url, headers, content, account, priority):
+async def _send_with_account_limit(connection, method, url, headers, content, account, priority, model=None):
     try:
-        lease = account_limiter.try_acquire(account.id, settings.MAX_CONCURRENT_REQUESTS_PER_ACCOUNT, priority)
+        lease = account_limiter.try_acquire(account.id, settings.concurrency_limit_for(model, getattr(account, "tier", None)), priority)
     except Exception:
         await connection.aclose()
         raise
@@ -464,6 +544,7 @@ async def _send_with_account_limit(connection, method, url, headers, content, ac
         await connection.aclose()
         raise
     original_aclose = candidate.aclose
+    candidate.extensions["proxy_egress_target"] = connection.target
 
     async def close_with_lease():
         try:
@@ -551,7 +632,12 @@ async def proxy_messages(
     # users have no global default -- a null/0 limit means no user-level cap.
     if user is not None and user.rate_limit_per_minute and user.rate_limit_per_minute > 0:
         window_start = datetime.now(timezone.utc) - timedelta(seconds=60)
-        recent_user_requests = db.query(UsageRecordDb).filter(UsageRecordDb.user_id == user_id, UsageRecordDb.created_at >= window_start).count()
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"), {"lock_key": f"user-rate:{user_id}"})
+        recent_user_requests = db.query(ProxyEventDb).filter(
+            ProxyEventDb.user_id == user_id,
+            ProxyEventDb.event_type == "request.reserved",
+            ProxyEventDb.created_at >= window_start,
+        ).count()
         if recent_user_requests >= user.rate_limit_per_minute:
             notifications.enqueue_client_limit(
                 db,
@@ -593,7 +679,12 @@ async def proxy_messages(
     rate_limit = key.rate_limit_per_minute if key.rate_limit_per_minute is not None else settings.DEFAULT_KEY_RATE_LIMIT_PER_MINUTE
     if rate_limit and rate_limit > 0:
         window_start = datetime.now(timezone.utc) - timedelta(seconds=60)
-        recent_requests = db.query(UsageRecordDb).filter(UsageRecordDb.api_key_id == api_key_id, UsageRecordDb.created_at >= window_start).count()
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"), {"lock_key": f"key-rate:{api_key_id}"})
+        recent_requests = db.query(ProxyEventDb).filter(
+            ProxyEventDb.api_key_id == api_key_id,
+            ProxyEventDb.event_type == "request.reserved",
+            ProxyEventDb.created_at >= window_start,
+        ).count()
         if recent_requests >= rate_limit:
             notifications.enqueue_client_limit(
                 db,
@@ -611,6 +702,18 @@ async def proxy_messages(
                 detail="API key rate limit exceeded; slow down.",
                 headers={"Retry-After": "60"},
             )
+
+    db.add(
+        ProxyEventDb(
+            id=uuid.uuid4(),
+            request_id=f"reservation_{uuid.uuid4().hex}",
+            user_id=user_id,
+            api_key_id=api_key_id,
+            event_type="request.reserved",
+            metadata_json=json.dumps({"scope": "client_rate_limit"}, separators=(",", ":")),
+        )
+    )
+    db.flush()
     if key.monthly_token_budget and key.monthly_token_budget > 0:
         if usage.monthly_token_usage_for_key(db, api_key_id) >= key.monthly_token_budget:
             notifications.enqueue_client_limit(
@@ -633,12 +736,26 @@ async def proxy_messages(
 
     # Priority routing always walks the whole pool before declaring exhaustion.
     max_attempts = db.query(AccountDb).count()
+    pool_wait_deadline = asyncio.get_running_loop().time() + max(0, settings.POOL_WAIT_TIMEOUT_SECONDS)
+    pool_wait_slots = max(0, int(settings.POOL_WAIT_TIMEOUT_SECONDS / max(settings.POOL_WAIT_POLL_INTERVAL_SECONDS, 0.1))) + 1
 
     # Account selection with transparent failover on rate limits.
-    for _ in range(max_attempts):
+    for _ in range(max_attempts + pool_wait_slots):
         account = rotation.select_account(db, user, exclude_ids)
         if account is None:
-            break
+            # Give cooldown and quota-refresh workers time to return an account
+            # before exposing a temporary pool failure to the client.
+            now_monotonic = asyncio.get_running_loop().time()
+            recoverable = db.query(AccountDb).filter(
+                AccountDb.status != AccountStatus.DISABLED,
+                AccountDb.provider_health != ProviderHealth.REAUTH_REQUIRED,
+            ).count() > 0
+            if not recoverable or now_monotonic >= pool_wait_deadline:
+                break
+            await asyncio.sleep(min(settings.POOL_WAIT_POLL_INTERVAL_SECONDS, pool_wait_deadline - now_monotonic))
+            db.expire_all()
+            exclude_ids.clear()
+            continue
         _emit_event(
             request, "account.attempt", user_id=user_id, api_key_id=api_key_id, account_id=account.id, metadata={"priority": account.priority}
         )
@@ -649,7 +766,16 @@ async def proxy_messages(
             access_token = rotation.ensure_fresh_token(db, account, egress_target=connection.target)
             headers = _build_upstream_headers(request.headers, access_token)
             db.commit()
-            candidate = await _send_with_account_limit(connection, request.method, upstream_url, headers, body, account, user.priority)
+            candidate = await _send_with_account_limit(
+                connection,
+                request.method,
+                upstream_url,
+                headers,
+                body,
+                account,
+                user.priority,
+                request_model,
+            )
             connection = None
             if candidate.status_code == 401:
                 await candidate.aclose()
@@ -663,6 +789,7 @@ async def proxy_messages(
                     body,
                     account,
                     user.priority,
+                    request_model,
                 )
                 connection = None
                 if candidate.status_code == 401:
@@ -705,6 +832,7 @@ async def proxy_messages(
                 account_id=account.id,
                 status_code=candidate.status_code,
                 message="Provider reported model capacity",
+                metadata={**_upstream_diagnostics(candidate), "failure_class": "model_capacity"},
             )
             await candidate.aclose()
             rotation.mark_cooldown(db, account, account.cooldown_seconds)
@@ -724,7 +852,33 @@ async def proxy_messages(
             exclude_ids.add(account.id)
             continue
 
+        # A generic pre-output error is transient, not proof of quota
+        # exhaustion. Never forward an HTTP 200 SSE error event to the client.
+        if (
+            getattr(candidate, "_proxy_pre_output_failure", False)
+            or candidate.extensions.get("proxy_pre_output_failure", False)
+            or candidate.status_code >= 500
+        ):
+            await candidate.aclose()
+            transient_seconds = max(1, min(settings.TRANSIENT_UPSTREAM_COOLDOWN_SECONDS, account.cooldown_seconds))
+            rotation.mark_cooldown(db, account, transient_seconds)
+            _emit_event(
+                request,
+                "account.transient_error",
+                user_id=user_id,
+                api_key_id=api_key_id,
+                account_id=account.id,
+                status_code=candidate.status_code,
+                message="Provider returned a retryable pre-output failure; quota was not marked exhausted.",
+                metadata={**_upstream_diagnostics(candidate), "failure_class": "transient_upstream"},
+            )
+            exclude_ids.add(account.id)
+            continue
+
+        rate_limit_body = await candidate.aread() if candidate.status_code == 429 else b""
         unified_status = rotation.update_quota_from_headers(account, candidate.headers)
+        body_status, body_reset_at = rotation.apply_rate_limit_body(account, rate_limit_body)
+        unified_status = body_status or unified_status
         provider_health.mark_response(account, candidate)
         if unified_status in rotation.HARD_LIMIT_STATUSES:
             notifications.enqueue_account_hard_limit(db, account, settings.FRONTEND_ORIGIN)
@@ -734,6 +888,8 @@ async def proxy_messages(
 
         if candidate.status_code == 429 or unified_status in rotation.HARD_LIMIT_STATUSES:
             retry_after = rotation.parse_retry_after(candidate.headers, account.cooldown_seconds)
+            if body_reset_at is not None:
+                retry_after = max(1, int((body_reset_at - datetime.now(timezone.utc)).total_seconds()))
             await candidate.aclose()
             rotation.mark_cooldown(db, account, retry_after)
             _emit_event(
@@ -744,6 +900,7 @@ async def proxy_messages(
                 account_id=account.id,
                 status_code=429,
                 message=f"Cooling down for {retry_after}s",
+                metadata={**_upstream_diagnostics(candidate), "failure_class": "account_quota", "provider_reset_at": body_reset_at},
             )
             exclude_ids.add(account.id)
             continue
@@ -783,6 +940,7 @@ async def proxy_messages(
                     body,
                     fallback,
                     user.priority,
+                    request_model,
                 )
                 connection = None
             except account_limiter.AccountBusy:
@@ -800,6 +958,7 @@ async def proxy_messages(
             except egress.EgressUnavailable:
                 fallback_excluded.add(fallback.id)
                 continue
+
             except Exception as exc:  # noqa: BLE001
                 if connection is not None:
                     await connection.aclose()
@@ -829,6 +988,28 @@ async def proxy_messages(
                 fallback_excluded.add(fallback.id)
                 continue
 
+            if getattr(candidate, "_proxy_pre_output_failure", False) or candidate.extensions.get("proxy_pre_output_failure", False):
+                failure_status = candidate.status_code
+                await candidate.aclose()
+                anthropic_fallbacks.mark_cooldown(
+                    fallback,
+                    max(1, settings.TRANSIENT_UPSTREAM_COOLDOWN_SECONDS),
+                    "Transient pre-output provider failure.",
+                )
+                db.commit()
+                fallback_excluded.add(fallback.id)
+                _emit_event(
+                    request,
+                    "fallback.transient_error",
+                    user_id=user_id,
+                    api_key_id=api_key_id,
+                    fallback_provider_id=fallback.id,
+                    status_code=failure_status,
+                    message="Fallback emitted a retryable pre-output failure; it was suppressed.",
+                    metadata={"failure_class": "transient_upstream"},
+                )
+                continue
+
             if candidate.status_code == 401:
                 await candidate.aclose()
                 anthropic_fallbacks.mark_invalid(fallback, "Credential rejected with HTTP 401.")
@@ -837,6 +1018,8 @@ async def proxy_messages(
                 continue
             if candidate.status_code == 429 or candidate.status_code >= 500:
                 retry_after = rotation.parse_retry_after(candidate.headers, 60)
+                if candidate.status_code == 429:
+                    retry_after = max(retry_after, rotation.parse_retry_after_body(await candidate.aread(), 60))
                 await candidate.aclose()
                 anthropic_fallbacks.mark_cooldown(
                     fallback,
@@ -918,6 +1101,8 @@ async def proxy_messages(
     if resp.status_code >= 400 or "text/event-stream" not in content_type:
         raw = await resp.aread()
         await resp.aclose()
+        if "text/event-stream" in content_type or raw.lstrip().startswith((b"event:", b"data:")):
+            raw = _sanitize_sse_payload(raw)
         raw = _restore_requested_model_in_error(raw, resp.status_code, requested_model, request_model)
 
         if not is_count_tokens:
@@ -954,7 +1139,7 @@ async def proxy_messages(
 
     async def stream_body():
         try:
-            async for chunk in resp.aiter_bytes():
+            async for chunk in _iter_sanitized_sse(resp):
                 accumulator.feed(chunk)
                 yield chunk
         finally:

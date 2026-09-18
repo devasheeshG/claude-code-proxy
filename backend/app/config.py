@@ -1,6 +1,7 @@
 # Path: app/config.py
 # Description: Loads the global `.env` file and exposes a pydantic `BaseSettings` class plus the fixed proxy/OAuth constants.
 
+import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
@@ -47,6 +48,9 @@ DEFAULT_MAX_FAILOVER_ATTEMPTS = 3  # accounts to try per request
 # subscription tier with controlled parallel probes, then make this policy
 # model/tier-aware instead of relying on this conservative default.
 DEFAULT_MAX_CONCURRENT_REQUESTS_PER_ACCOUNT = 3
+DEFAULT_POOL_WAIT_TIMEOUT_SECONDS = 150
+DEFAULT_POOL_WAIT_POLL_INTERVAL_SECONDS = 2
+DEFAULT_TRANSIENT_UPSTREAM_COOLDOWN_SECONDS = 5
 
 
 class Settings(BaseSettings):
@@ -76,7 +80,7 @@ class Settings(BaseSettings):
 
     # How often the quota-refresher sidecar re-probes every account's usage and subscription tier.
     QUOTA_REFRESH_INTERVAL_SECONDS: int = 60
-    WARMUP_ENABLED: bool = True
+    WARMUP_ENABLED: bool = False
     WARMUP_TRIGGER_POOL_USAGE_PCT: float = 0.10
     WARMUP_WEEKLY_RESERVE_PCT: float = 0.90
     WARMUP_MODEL: str = "claude-haiku-4-5"
@@ -86,6 +90,13 @@ class Settings(BaseSettings):
     # Default proxy rate limit (requests/minute) for an API key with no explicit override; 0 disables limiting.
     DEFAULT_KEY_RATE_LIMIT_PER_MINUTE: int = 0
     MAX_CONCURRENT_REQUESTS_PER_ACCOUNT: int = DEFAULT_MAX_CONCURRENT_REQUESTS_PER_ACCOUNT
+    MODEL_CONCURRENCY_LIMITS_JSON: str = ""
+    TIER_CONCURRENCY_LIMITS_JSON: str = ""
+    POOL_WAIT_TIMEOUT_SECONDS: int = DEFAULT_POOL_WAIT_TIMEOUT_SECONDS
+    POOL_WAIT_POLL_INTERVAL_SECONDS: float = DEFAULT_POOL_WAIT_POLL_INTERVAL_SECONDS
+    TRANSIENT_UPSTREAM_COOLDOWN_SECONDS: int = DEFAULT_TRANSIENT_UPSTREAM_COOLDOWN_SECONDS
+    FALLBACK_GENERATION_CANARY_ENABLED: bool = True
+    FALLBACK_CANARY_MAX_OUTPUT_TOKENS: int = 1
 
     # Optional outbound paths. Each target is either a local source address or
     # an authenticated CONNECT relay; accounts may pin to a target by ID.
@@ -148,6 +159,19 @@ class Settings(BaseSettings):
 
     # extra="ignore" so deploy-only keys in .env (HTTP_PORT, TRAEFIK_*, POSTGRES_*) don't fail backend startup.
     model_config = SettingsConfigDict(env_file=str(_ENV_FILE), env_file_encoding="utf-8", extra="ignore")
+
+    def concurrency_limit_for(self, model: str | None = None, tier: str | None = None) -> int:
+        for raw, key in ((self.MODEL_CONCURRENCY_LIMITS_JSON, model), (self.TIER_CONCURRENCY_LIMITS_JSON, tier)):
+            if not raw.strip() or not key:
+                continue
+            try:
+                values = json.loads(raw)
+                value = values.get(key) if isinstance(values, dict) else None
+                if value is not None:
+                    return max(1, min(int(value), 32))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+        return max(1, min(int(self.MAX_CONCURRENT_REQUESTS_PER_ACCOUNT), 32))
 
 
 @lru_cache

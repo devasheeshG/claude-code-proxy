@@ -1,6 +1,7 @@
 # Path: app/utils/rotation.py
 # Description: Account rotation engine -- token freshness, quota tracking, quota-aware selection, and 429 cooldowns.
 
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -15,6 +16,7 @@ from app.utils.postgres import AccountDb, UserDb
 
 # Unified-status values that mean "this account is hard-limited right now".
 HARD_LIMIT_STATUSES = {"rate_limited", "blocked", "queueing_hard", "payment_required", "rejected"}
+HARD_LIMIT_BODY_TYPES = HARD_LIMIT_STATUSES | {"rate_limit_error", "rate_limited", "usage_limit_reached"}
 
 
 @dataclass(frozen=True)
@@ -270,6 +272,39 @@ def update_quota_from_headers(account: AccountDb, headers: Mapping[str, str]) ->
     return h.get("anthropic-ratelimit-unified-status")
 
 
+def apply_rate_limit_body(account: AccountDb, body: bytes) -> tuple[Optional[str], Optional[datetime]]:
+    """Persist Anthropic rate-limit state and any provider reset timestamp.
+
+    Anthropic commonly returns a JSON ``rate_limit_error`` body without a
+    useful ``Retry-After`` header.  Parsing it prevents the router from
+    retrying a hard-limited subscription after the generic cooldown.
+    """
+    try:
+        payload = json.loads(body.decode(errors="replace"))
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+        return None, None
+    error = payload.get("error") if isinstance(payload, Mapping) else None
+    if not isinstance(error, Mapping):
+        return None, None
+    reached_type = error.get("type") or error.get("code")
+    if not isinstance(reached_type, str):
+        return None, None
+    payload_mapping = payload if isinstance(payload, Mapping) else {}
+    reset_raw = error.get("resets_at") or error.get("reset_at") or payload_mapping.get("resets_at")
+    reset_at = _parse_reset(str(reset_raw)) if reset_raw is not None else None
+    if reset_at is None:
+        seconds_raw = error.get("resets_in_seconds") or payload_mapping.get("resets_in_seconds")
+        try:
+            if seconds_raw is not None:
+                reset_at = datetime.now(timezone.utc) + timedelta(seconds=max(0, float(seconds_raw)))
+        except (TypeError, ValueError):
+            reset_at = None
+    if reached_type in HARD_LIMIT_BODY_TYPES:
+        account.session_used_pct = 1.0
+        account.session_reset_at = reset_at
+    return reached_type, reset_at
+
+
 def apply_usage_probe(account: AccountDb, usage: Mapping[str, Optional[dict]]) -> None:
     """Update quota fields from a zero-spend usage probe (see oauth.fetch_usage)."""
     five_hour = usage.get("five_hour")
@@ -315,11 +350,33 @@ def parse_retry_after(headers: Mapping[str, str], default_seconds: int) -> int:
     seconds = fallback
     if raw:
         try:
-            seconds = int(float(raw))
+            value = float(raw)
+            seconds = int(value - datetime.now(timezone.utc).timestamp()) if value > 1_000_000_000 else int(value)
         except ValueError:
             seconds = fallback
 
-    return max(1, min(seconds, 300))
+    return max(1, min(seconds, 86_400))
+
+
+def parse_retry_after_body(body: bytes, default_seconds: int) -> int:
+    try:
+        payload = json.loads(body.decode(errors="replace"))
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+        return max(1, min(default_seconds, 2_592_000))
+    error = payload.get("error") if isinstance(payload, Mapping) else None
+    source = error if isinstance(error, Mapping) else payload if isinstance(payload, Mapping) else {}
+    reset = source.get("resets_at") or source.get("reset_at")
+    if reset is not None:
+        parsed = _parse_reset(str(reset))
+        if parsed is not None:
+            return max(1, min(int((parsed - datetime.now(timezone.utc)).total_seconds()), 2_592_000))
+    try:
+        seconds = source.get("resets_in_seconds")
+        if seconds is not None:
+            return max(1, min(int(float(seconds)), 2_592_000))
+    except (TypeError, ValueError):
+        pass
+    return max(1, min(default_seconds, 2_592_000))
 
 
 def mark_cooldown(db: Session, account: AccountDb, retry_after_seconds: int) -> None:

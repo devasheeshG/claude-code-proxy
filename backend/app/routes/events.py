@@ -31,6 +31,7 @@ def list_events(
     db: Session = Depends(get_db),
 ) -> ProxyEventPage:  # noqa: B008
     query = db.query(ProxyEventDb)
+    query = query.filter(ProxyEventDb.event_type != "request.reserved")
     if event_type:
         query = query.filter(ProxyEventDb.event_type == event_type)
     if request_id:
