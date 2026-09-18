@@ -80,6 +80,8 @@ class Settings(BaseSettings):
     WARMUP_TRIGGER_POOL_USAGE_PCT: float = 0.10
     WARMUP_WEEKLY_RESERVE_PCT: float = 0.90
     WARMUP_MODEL: str = "claude-haiku-4-5"
+    # Comma-separated local model allowlist. Blank keeps the built-in lineup.
+    ALLOWED_MODELS: str = ""
 
     # Default proxy rate limit (requests/minute) for an API key with no explicit override; 0 disables limiting.
     DEFAULT_KEY_RATE_LIMIT_PER_MINUTE: int = 0

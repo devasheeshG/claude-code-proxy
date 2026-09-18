@@ -10,7 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.logger import get_logger
-from app.model_catalog import MODEL_IDS
+from app.model_catalog import configured_model_ids
 from app.utils import request_policy, security, usage
 from app.utils.models.api import (
     ApiKey,
@@ -96,7 +96,7 @@ def _build_users(db: Session, users: list[UserDb]) -> list[User]:
 
 def _known_model_options(db: Session) -> list[str]:
     del db
-    return list(MODEL_IDS)
+    return list(configured_model_ids())
 
 
 @router.get("/model-options")
