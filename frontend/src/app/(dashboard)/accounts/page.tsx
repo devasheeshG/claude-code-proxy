@@ -62,8 +62,48 @@ function cooldownIsActive(account: Account, now = Date.now()): boolean {
     );
 }
 
+type ExhaustedQuotaWindow = {
+    label: string;
+    resetAt: string | null;
+    fraction: number | null;
+};
+
+/**
+ * COOLDOWN is also used internally to keep a quota-exhausted account out of
+ * rotation until the provider reset. That state is a hard limit, not a
+ * transient upstream cooldown, so it gets its own dashboard presentation.
+ */
+function exhaustedQuotaWindow(account: Account): ExhaustedQuotaWindow | null {
+    const windows: ExhaustedQuotaWindow[] = [
+        {
+            label: "5-hour limit",
+            resetAt: account.session_reset_at,
+            fraction: account.session_used_pct,
+        },
+        {
+            label: "Weekly limit",
+            resetAt: account.weekly_reset_at,
+            fraction: account.weekly_used_pct,
+        },
+        {
+            label: "Monthly limit",
+            resetAt: account.monthly_reset_at,
+            fraction: account.monthly_used_pct,
+        },
+    ];
+    const exhausted = windows.filter((window) => window.fraction !== null && window.fraction >= 1);
+    if (exhausted.length === 0) return null;
+
+    return exhausted.reduce((latest, window) => {
+        if (!latest.resetAt) return window;
+        if (!window.resetAt) return latest;
+        return Date.parse(window.resetAt) > Date.parse(latest.resetAt) ? window : latest;
+    });
+}
+
 function statusBadge(account: Account) {
     if (account.status === "DISABLED") return <Badge tone="bad">Disabled</Badge>;
+    if (exhaustedQuotaWindow(account)) return <Badge tone="bad">Limit exhausted</Badge>;
     if (cooldownIsActive(account)) return <Badge tone="warn">Cooldown</Badge>;
     return <Badge tone="good">Active</Badge>;
 }
@@ -846,7 +886,21 @@ export default function AccountsPage() {
                                                                         it to the pool.
                                                                     </div>
                                                                 ) : null}
-                                                                {cooldownIsActive(acc) ? (
+                                                                {exhaustedQuotaWindow(acc) ? (
+                                                                    <div className="border-bad-500/30 bg-bad-500/10 text-bad-500 mt-3 rounded-md border px-2.5 py-1.5 text-[11px]">
+                                                                        {
+                                                                            exhaustedQuotaWindow(
+                                                                                acc,
+                                                                            )!.label
+                                                                        }{" "}
+                                                                        exhausted ·{" "}
+                                                                        {formatCountdown(
+                                                                            exhaustedQuotaWindow(
+                                                                                acc,
+                                                                            )!.resetAt,
+                                                                        )}
+                                                                    </div>
+                                                                ) : cooldownIsActive(acc) ? (
                                                                     <div className="border-warn-500/30 bg-warn-500/10 text-warn-500 mt-3 rounded-md border px-2.5 py-1.5 text-[11px]">
                                                                         In cooldown —{" "}
                                                                         {formatCountdown(
