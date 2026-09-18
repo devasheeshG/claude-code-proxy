@@ -536,7 +536,7 @@ def delete_account(
     _: str = Depends(security.require_admin),  # noqa: B008
     db: Session = Depends(get_db),  # noqa: B008
 ) -> None:
-    """Permanently remove an account, detach usage history, and close priority gaps."""
+    """Remove an account without renumbering the remaining priority lanes."""
     account = db.query(AccountDb).filter(AccountDb.id == account_id).first()
     if account is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
@@ -544,9 +544,8 @@ def delete_account(
     db.query(UsageRecordDb).filter(UsageRecordDb.account_id == account_id).update({UsageRecordDb.account_id: None}, synchronize_session=False)
     db.delete(account)
     db.flush()
-    remaining = db.query(AccountDb).order_by(AccountDb.priority.asc(), AccountDb.created_at.asc()).all()
-    for position, candidate in enumerate(remaining, start=1):
-        candidate.priority = position
+    # Priority is a lane, not a unique rank. Deleting an account must not
+    # renumber unrelated accounts or silently change their routing policy.
     db.commit()
 
     logger.info(f"Deleted account '{account.label}'")
