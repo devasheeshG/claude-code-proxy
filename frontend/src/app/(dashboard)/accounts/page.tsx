@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, Check, ListChecks } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { Account, EgressTarget, ProviderHealth } from "@/lib/types";
@@ -170,6 +171,10 @@ function egressTargetLabel(account: Account, targets: EgressTarget[]): string {
 }
 
 export default function AccountsPage() {
+    const router = useRouter();
+    const pathname = usePathname();
+    const searchParams = useSearchParams();
+    const queryString = searchParams.toString();
     const [accounts, setAccounts] = useState<Account[] | null>(null);
     const [egressTargets, setEgressTargets] = useState<EgressTarget[]>([]);
     const [savedPriorities, setSavedPriorities] = useState<Record<string, number>>({});
@@ -195,6 +200,30 @@ export default function AccountsPage() {
     const [accountFilter, setAccountFilter] = useState<AccountFilter>("usable");
     const [accountSearch, setAccountSearch] = useState("");
     const loadRequestId = useRef(0);
+
+    const updateUrl = useCallback(
+        (updates: Record<string, string | null | undefined>) => {
+            const params = new URLSearchParams(queryString);
+            Object.entries(updates).forEach(([key, value]) => {
+                if (value === null || value === undefined || value === "") params.delete(key);
+                else params.set(key, value);
+            });
+            const nextQueryString = params.toString();
+            router.replace(nextQueryString ? `${pathname}?${nextQueryString}` : pathname, {
+                scroll: false,
+            });
+        },
+        [pathname, queryString, router],
+    );
+
+    useEffect(() => {
+        const params = new URLSearchParams(queryString);
+        const candidate = params.get("section");
+        if (candidate === "all" || candidate === "authenticated" || candidate === "usable") {
+            setAccountFilter(candidate);
+        }
+        setAccountSearch(params.get("search") ?? "");
+    }, [queryString]);
 
     // A "tick" used to re-render countdowns every second.
     const [, setTick] = useState(0);
@@ -398,7 +427,11 @@ export default function AccountsPage() {
                     <TextInput
                         type="search"
                         value={accountSearch}
-                        onChange={(event) => setAccountSearch(event.target.value)}
+                        onChange={(event) => {
+                            const next = event.target.value;
+                            setAccountSearch(next);
+                            updateUrl({ search: next });
+                        }}
                         placeholder="Search name or email…"
                         aria-label="Search accounts by name or email"
                     />
@@ -407,7 +440,10 @@ export default function AccountsPage() {
                     <Segmented
                         options={ACCOUNT_FILTER_OPTIONS}
                         value={accountFilter}
-                        onChange={setAccountFilter}
+                        onChange={(next) => {
+                            setAccountFilter(next);
+                            updateUrl({ section: next });
+                        }}
                         label="Filter accounts"
                     />
                     <Button variant="ghost" onClick={() => void load(true)}>
@@ -533,7 +569,10 @@ export default function AccountsPage() {
                                                 acc.provider_health === "DEGRADED" ||
                                                 acc.provider_health === "UNKNOWN" ||
                                                 healthIsStale(acc);
-                                            const assignedEgress = egressTargetLabel(acc, egressTargets);
+                                            const assignedEgress = egressTargetLabel(
+                                                acc,
+                                                egressTargets,
+                                            );
                                             return (
                                                 <div
                                                     key={acc.id}
@@ -626,7 +665,8 @@ export default function AccountsPage() {
                                                                                 "no email on file"}
                                                                         </div>
                                                                         <div className="text-fog-500 mt-1 truncate text-[11px]">
-                                                                            Egress · {assignedEgress}
+                                                                            Egress ·{" "}
+                                                                            {assignedEgress}
                                                                         </div>
                                                                         {false &&
                                                                         acc.provider_health ===
