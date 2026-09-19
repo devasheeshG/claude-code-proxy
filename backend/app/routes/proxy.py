@@ -323,7 +323,7 @@ def _sanitize_sse_payload(raw: bytes) -> bytes:
     output = bytearray()
     remaining = raw
     while remaining:
-        match = re.search(br"\r?\n\r?\n", remaining)
+        match = re.search(rb"\r?\n\r?\n", remaining)
         if match is None:
             if not _is_provider_error_frame(remaining):
                 output.extend(remaining)
@@ -344,7 +344,7 @@ async def _iter_sanitized_sse(response: httpx.Response):
     async for chunk in response.aiter_bytes():
         buffer.extend(chunk)
         while True:
-            match = re.search(br"\r?\n\r?\n", buffer)
+            match = re.search(rb"\r?\n\r?\n", buffer)
             if match is None:
                 break
             end = match.end()
@@ -633,11 +633,15 @@ async def proxy_messages(
     if user is not None and user.rate_limit_per_minute and user.rate_limit_per_minute > 0:
         window_start = datetime.now(timezone.utc) - timedelta(seconds=60)
         db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"), {"lock_key": f"user-rate:{user_id}"})
-        recent_user_requests = db.query(ProxyEventDb).filter(
-            ProxyEventDb.user_id == user_id,
-            ProxyEventDb.event_type == "request.reserved",
-            ProxyEventDb.created_at >= window_start,
-        ).count()
+        recent_user_requests = (
+            db.query(ProxyEventDb)
+            .filter(
+                ProxyEventDb.user_id == user_id,
+                ProxyEventDb.event_type == "request.reserved",
+                ProxyEventDb.created_at >= window_start,
+            )
+            .count()
+        )
         if recent_user_requests >= user.rate_limit_per_minute:
             notifications.enqueue_client_limit(
                 db,
@@ -680,11 +684,15 @@ async def proxy_messages(
     if rate_limit and rate_limit > 0:
         window_start = datetime.now(timezone.utc) - timedelta(seconds=60)
         db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"), {"lock_key": f"key-rate:{api_key_id}"})
-        recent_requests = db.query(ProxyEventDb).filter(
-            ProxyEventDb.api_key_id == api_key_id,
-            ProxyEventDb.event_type == "request.reserved",
-            ProxyEventDb.created_at >= window_start,
-        ).count()
+        recent_requests = (
+            db.query(ProxyEventDb)
+            .filter(
+                ProxyEventDb.api_key_id == api_key_id,
+                ProxyEventDb.event_type == "request.reserved",
+                ProxyEventDb.created_at >= window_start,
+            )
+            .count()
+        )
         if recent_requests >= rate_limit:
             notifications.enqueue_client_limit(
                 db,
@@ -746,10 +754,15 @@ async def proxy_messages(
             # Give cooldown and quota-refresh workers time to return an account
             # before exposing a temporary pool failure to the client.
             now_monotonic = asyncio.get_running_loop().time()
-            recoverable = db.query(AccountDb).filter(
-                AccountDb.status != AccountStatus.DISABLED,
-                AccountDb.provider_health != ProviderHealth.REAUTH_REQUIRED,
-            ).count() > 0
+            recoverable = (
+                db.query(AccountDb)
+                .filter(
+                    AccountDb.status != AccountStatus.DISABLED,
+                    AccountDb.provider_health != ProviderHealth.REAUTH_REQUIRED,
+                )
+                .count()
+                > 0
+            )
             if not recoverable or now_monotonic >= pool_wait_deadline:
                 break
             await asyncio.sleep(min(settings.POOL_WAIT_POLL_INTERVAL_SECONDS, pool_wait_deadline - now_monotonic))
