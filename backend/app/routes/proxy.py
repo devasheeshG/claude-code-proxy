@@ -909,7 +909,14 @@ async def proxy_messages(
             background_tasks.add_task(warmup.warm_pool_if_needed)
         resp = candidate
         chosen_id = account.id
-        _emit_event(request, "account.selected", user_id=user_id, api_key_id=api_key_id, account_id=account.id, status_code=candidate.status_code)
+        _emit_event(
+            request,
+            "account.response_received",
+            user_id=user_id,
+            api_key_id=api_key_id,
+            account_id=account.id,
+            status_code=candidate.status_code,
+        )
         break
 
     # Pay-as-you-go credentials are a true fallback tier: they are considered
@@ -1047,7 +1054,7 @@ async def proxy_messages(
             chosen_fallback_id = fallback.id
             _emit_event(
                 request,
-                "fallback.selected",
+                "fallback.response_received",
                 user_id=user_id,
                 api_key_id=api_key_id,
                 fallback_provider_id=fallback.id,

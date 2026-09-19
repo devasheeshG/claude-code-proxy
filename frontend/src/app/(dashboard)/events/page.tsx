@@ -11,15 +11,22 @@ import { formatCompactNumber, formatDateTime } from "@/lib/format";
 import { RequestCaptureOverlay } from "@/components/RequestCaptureOverlay";
 const EVENT_TYPES = [
     "request.received",
+    "request.exhausted",
     "account.attempt",
+    "account.busy",
     "account.capacity",
     "account.cooldown",
+    "account.error",
     "account.rate_limited",
-    "account.selected",
+    "account.response_received",
+    "account.transient_error",
     "fallback.attempt",
+    "fallback.busy",
     "fallback.capacity",
+    "fallback.error",
+    "fallback.response_received",
+    "fallback.transient_error",
     "response.returned",
-    "request.exhausted",
 ];
 const initialRange = (): TimeRange => {
     const now = new Date();
@@ -38,7 +45,7 @@ const rowTone = (type: string) =>
         ? "bg-bad-500/10 hover:bg-bad-500/15"
         : type.includes("cooldown") || type.includes("rate_limited")
           ? "bg-warn-500/10 hover:bg-warn-500/15"
-          : type.includes("selected") || type.includes("returned")
+          : type.includes("response_received") || type.includes("returned")
             ? "bg-good-500/10 hover:bg-good-500/15"
             : "hover:bg-brand-500/5";
 
