@@ -81,6 +81,8 @@ def is_eligible(account: AccountDb, now: Optional[datetime] = None) -> bool:
 def is_cold(account: AccountDb, now: Optional[datetime] = None) -> bool:
     """Return whether the five-hour window has not started for this account."""
     now = now or datetime.now(timezone.utc)
+    if _future(account.warmup_next_at, now):
+        return False
     # Provider usage probes often return the next reset timestamp even when an
     # account has not made a request in the current window. That timestamp is
     # not evidence that this proxy has warmed the account, so use observed
@@ -153,11 +155,17 @@ def _send(account: AccountDb, access_token: str, egress_target: egress.EgressTar
         client.close()
 
 
-def _mark_result(account: AccountDb, now: datetime, status: str, error: Optional[str] = None) -> None:
+def _mark_result(
+    account: AccountDb,
+    now: datetime,
+    status: str,
+    error: Optional[str] = None,
+    next_at: Optional[datetime] = None,
+) -> None:
     account.warmup_last_at = now
     account.warmup_last_status = status
     account.warmup_last_error = error
-    account.warmup_next_at = None
+    account.warmup_next_at = next_at
     account.updated_at = now
 
 
@@ -173,7 +181,12 @@ def _warm_one(db: Session, account: AccountDb, now: datetime) -> bool:
         response = _send(account, access_token, target)
         rotation.update_quota_from_headers(account, response.headers)
         provider_health.mark_response(account, response)
-        _mark_result(account, now, "success")
+        # Hold this account until the current five-hour window ends. The
+        # provider reset is preferred; the five-hour fallback prevents the
+        # refresher from issuing repeated synthetic requests when headers omit
+        # reset metadata.
+        next_at = _as_utc(account.session_reset_at) or now + timedelta(hours=5)
+        _mark_result(account, now, "success", next_at=next_at)
         db.commit()
         logger.info("Warmed Claude account '%s'", account.label)
         return True
