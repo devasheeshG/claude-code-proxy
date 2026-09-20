@@ -893,13 +893,14 @@ async def proxy_messages(
         body_status, body_reset_at = rotation.apply_rate_limit_body(account, rate_limit_body)
         unified_status = body_status or unified_status
         provider_health.mark_response(account, candidate)
-        if unified_status in rotation.HARD_LIMIT_STATUSES:
+        hard_limit = candidate.status_code == 429 or unified_status in rotation.HARD_LIMIT_STATUSES
+        if hard_limit:
             notifications.enqueue_account_hard_limit(db, account, settings.FRONTEND_ORIGIN)
         else:
             notifications.enqueue_account_threshold(db, account, settings.FRONTEND_ORIGIN)
         db.commit()
 
-        if candidate.status_code == 429 or unified_status in rotation.HARD_LIMIT_STATUSES:
+        if hard_limit:
             retry_after = rotation.parse_retry_after(candidate.headers, account.cooldown_seconds)
             if body_reset_at is not None:
                 retry_after = max(1, int((body_reset_at - datetime.now(timezone.utc)).total_seconds()))
