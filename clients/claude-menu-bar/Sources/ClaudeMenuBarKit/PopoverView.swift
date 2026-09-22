@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 public struct PopoverView: View {
@@ -30,7 +31,15 @@ public struct PopoverView: View {
             Divider()
             HStack {
                 Text("Updated ") + Text(model.lastUpdated, style: .relative) + Text(" ago")
-                Spacer(); Text("Open dashboard").foregroundStyle(.orange)
+                Spacer()
+                Text("Open dashboard").foregroundStyle(.orange)
+                Button { NSApplication.shared.terminate(nil) } label: {
+                    Label("Quit", systemImage: "power")
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .help("Quit Claude Code Proxy")
             }.font(.caption2).foregroundStyle(.secondary).padding(10)
         }.background(.regularMaterial).sheet(isPresented: $showingSettings) { ConnectionSettings(model: model) }
     }
