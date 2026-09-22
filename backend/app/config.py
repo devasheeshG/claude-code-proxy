@@ -104,7 +104,7 @@ class Settings(BaseSettings):
     # an authenticated CONNECT relay; accounts may pin to a target by ID.
     EGRESS_TARGETS_JSON: str = ""
     DEFAULT_EGRESS_MAX_CONCURRENCY: int = 32
-    EGRESS_RELAY_USERNAME: str = "recallr"
+    EGRESS_RELAY_USERNAME: str = "proxy"
     EGRESS_RELAY_TOKEN: Optional[str] = None
 
     # Exact client-facing request/response bodies go directly to S3/MinIO.

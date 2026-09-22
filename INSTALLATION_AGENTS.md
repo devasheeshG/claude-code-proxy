@@ -287,11 +287,12 @@ On the confirmed Claude Code machine and user account:
 
 6. Ask whether I also want the optional macOS menu-bar app installed on a Mac.
    Only continue if I explicitly opt in and the agent has access to that Mac.
-   Download the latest `Claude-Code-Proxy-macOS.zip` from
-   `https://github.com/devasheeshG/claude-code-proxy/releases`, unzip it into
-   `/Applications`, and explain that the build is ad-hoc signed rather than
-   notarized. If Gatekeeper blocks first launch, have me Control-click **Claude
-   Code Proxy.app** and choose **Open**. Never ask for or handle my macOS password.
+   Download the latest `Claude-Code-Proxy-macOS.dmg` from
+   `https://github.com/devasheeshG/claude-code-proxy/releases`, open it, and
+   copy **Claude Code Proxy.app** into `/Applications`. Explain that the build
+   is ad-hoc signed rather than notarized. If Gatekeeper blocks first launch,
+   have me Control-click **Claude Code Proxy.app** and choose **Open**. Never
+   ask for or handle my macOS password.
 
 If Claude Code is on another machine you cannot access, generate precise steps
 for that machine but do not reveal the key in your response. Let the user paste

@@ -2,6 +2,7 @@ import SwiftUI
 
 public struct PopoverView: View {
     @ObservedObject var model: DashboardModel
+    @State private var showingSettings = false
 
     public init(model: DashboardModel) { self.model = model }
 
@@ -9,12 +10,10 @@ public struct PopoverView: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: "sparkles.fill").font(.title2).foregroundStyle(.orange)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Claude Code Proxy").font(.headline)
-                    Text("Recallr AI").font(.caption).foregroundStyle(.secondary)
-                }
+                VStack(alignment: .leading, spacing: 2) { Text("Claude Code Proxy").font(.headline); Text("Menu bar dashboard").font(.caption).foregroundStyle(.secondary) }
                 Spacer()
-                Label("Healthy", systemImage: "circle.fill").font(.caption).foregroundStyle(.green)
+                Button { showingSettings = true } label: { Image(systemName: "gearshape").font(.body) }.buttonStyle(.borderless).help("Connection settings")
+                Label(model.isConfigured ? "Configured" : "Not configured", systemImage: model.isConfigured ? "checkmark.circle" : "circle.dashed").font(.caption).foregroundStyle(model.isConfigured ? .green : .secondary)
             }.padding(.horizontal, 14).padding(.top, 14)
 
             Picker("View", selection: $model.tab) {
@@ -33,7 +32,22 @@ public struct PopoverView: View {
                 Text("Updated ") + Text(model.lastUpdated, style: .relative) + Text(" ago")
                 Spacer(); Text("Open dashboard").foregroundStyle(.orange)
             }.font(.caption2).foregroundStyle(.secondary).padding(10)
-        }.background(.regularMaterial)
+        }.background(.regularMaterial).sheet(isPresented: $showingSettings) { ConnectionSettings(model: model) }
+    }
+}
+
+private struct ConnectionSettings: View {
+    @ObservedObject var model: DashboardModel
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Connection").font(.title3.bold())
+            Text("Connect this menu-bar app to any compatible proxy. Values are stored locally; the secret is kept in the macOS Keychain.").font(.caption).foregroundStyle(.secondary)
+            TextField("Base URL", text: $model.baseURL).textFieldStyle(.roundedBorder)
+            TextField("Username (optional)", text: $model.username).textFieldStyle(.roundedBorder)
+            SecureField("API key or password", text: $model.secret).textFieldStyle(.roundedBorder)
+            HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Button("Save") { model.saveConnection(); dismiss() }.buttonStyle(.borderedProminent).tint(.orange).keyboardShortcut(.defaultAction) }
+        }.padding(20).frame(width: 380)
     }
 }
 
