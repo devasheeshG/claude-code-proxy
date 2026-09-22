@@ -47,6 +47,7 @@ jobs:
           APP_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
           app="$RUNNER_TEMP/Claude Code Proxy.app"
           mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
           cp .build/release/ClaudeMenuBar "$app/Contents/MacOS/ClaudeMenuBar"
