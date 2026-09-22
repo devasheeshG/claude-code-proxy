@@ -57,7 +57,11 @@ jobs:
           chmod +x "$app/Contents/MacOS/ClaudeMenuBar"
           codesign --force --deep --sign - "$app"
           codesign --verify --deep --strict "$app"
-          hdiutil create -volname "Claude Code Proxy" -srcfolder "$app" -ov -format UDZO "$GITHUB_WORKSPACE/artifacts/Claude-Code-Proxy-macOS.dmg" >/dev/null
+          staging="$RUNNER_TEMP/Claude Code Proxy Installer"
+          mkdir -p "$staging"
+          cp -R "$app" "$staging/Claude Code Proxy.app"
+          ln -s /Applications "$staging/Applications"
+          hdiutil create -volname "Claude Code Proxy" -srcfolder "$staging" -ov -format UDZO "$GITHUB_WORKSPACE/artifacts/Claude-Code-Proxy-macOS.dmg" >/dev/null
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
