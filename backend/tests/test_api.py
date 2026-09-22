@@ -213,11 +213,14 @@ def test_proxy_streaming_relays_and_records(client, admin_headers, seed_account,
     )
     assert resp.status_code == 200
     assert "message_delta" in resp.text
+    assert '"model":"x"' in resp.text
+    assert '"model":"claude-sonnet-4-6"' not in resp.text
 
     record = client.get("/api/v1/stats/usage", headers=admin_headers).json()["items"][0]
     assert record["input_tokens"] == 23  # 20 input + 3 cache_read
     assert record["output_tokens"] == 42
     assert record["reasoning_level"] == "high"
+    assert record["model"] == "claude-sonnet-4-6"
 
 
 @respx.mock
@@ -620,6 +623,7 @@ def test_user_model_override_rewrites_upstream_request(client, admin_headers, se
     )
     assert response.status_code == 200
     assert json.loads(upstream.calls[0].request.content)["model"] == "claude-sonnet-4-6"
+    assert response.json()["model"] == "CLAUDE-OPUS-4-8"
 
 
 @respx.mock

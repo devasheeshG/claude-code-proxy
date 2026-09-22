@@ -172,6 +172,57 @@ def _restore_requested_model_in_error(
     )
 
 
+def _rewrite_client_model_fields(payload: object, requested_model: object) -> None:
+    """Keep provider-reported model private while clients see their request."""
+    if not isinstance(requested_model, str) or not requested_model.strip():
+        return
+    if not isinstance(payload, dict):
+        return
+    if isinstance(payload.get("model"), str):
+        payload["model"] = requested_model
+    for envelope in ("response", "message"):
+        nested = payload.get(envelope)
+        if isinstance(nested, dict) and isinstance(nested.get("model"), str):
+            nested["model"] = requested_model
+
+
+def _restore_requested_model_in_success_json(raw: bytes, status_code: int, requested_model: object) -> bytes:
+    if status_code >= 400 or not isinstance(requested_model, str) or not requested_model.strip():
+        return raw
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return raw
+    if not isinstance(payload, dict):
+        return raw
+    _rewrite_client_model_fields(payload, requested_model)
+    return json.dumps(payload, separators=(",", ":")).encode()
+
+
+def _restore_requested_model_in_sse_frame(frame: bytes, requested_model: object) -> bytes:
+    if not isinstance(requested_model, str) or not requested_model.strip():
+        return frame
+    output = bytearray()
+    for line in frame.splitlines(keepends=True):
+        if not line.startswith(b"data:"):
+            output.extend(line)
+            continue
+        content = line.rstrip(b"\r\n")
+        newline = line[len(content) :]
+        payload = content[len(b"data:") :].strip()
+        if not payload or payload == b"[DONE]":
+            output.extend(line)
+            continue
+        try:
+            value = json.loads(payload)
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            output.extend(line)
+            continue
+        _rewrite_client_model_fields(value, requested_model)
+        output.extend(b"data: " + json.dumps(value, separators=(",", ":")).encode() + newline)
+    return bytes(output)
+
+
 def _build_upstream_headers(incoming, access_token: str) -> Dict[str, str]:
     """Clone the client's headers, strip auth/transport, inject the OAuth bearer and the required anthropic flags."""
     headers: Dict[str, str] = {}
@@ -1146,6 +1197,8 @@ async def proxy_messages(
                 chosen_fallback_id,
             )
 
+        raw = _restore_requested_model_in_success_json(raw, resp.status_code, requested_model)
+
         return Response(
             content=raw,
             status_code=resp.status_code,
@@ -1162,7 +1215,7 @@ async def proxy_messages(
         try:
             async for chunk in _iter_sanitized_sse(resp):
                 accumulator.feed(chunk)
-                yield chunk
+                yield _restore_requested_model_in_sse_frame(chunk, requested_model)
         finally:
             await resp.aclose()
             captured_usage = accumulator.result()
