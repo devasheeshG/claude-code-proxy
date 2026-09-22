@@ -13,20 +13,24 @@ public struct PopoverView: View {
                 Image(systemName: "sparkles.fill").font(.title2).foregroundStyle(.orange)
                 VStack(alignment: .leading, spacing: 2) { Text("Claude Code Proxy").font(.headline); Text("Menu bar dashboard").font(.caption).foregroundStyle(.secondary) }
                 Spacer()
-                Button { showingSettings = true } label: { Image(systemName: "gearshape").font(.body) }.buttonStyle(.borderless).help("Connection settings")
+                Button { showingSettings.toggle() } label: { Image(systemName: showingSettings ? "xmark" : "gearshape").font(.body) }.buttonStyle(.borderless).help(showingSettings ? "Close settings" : "Connection settings")
                 Label(model.isConfigured ? "Configured" : "Not configured", systemImage: model.isConfigured ? "checkmark.circle" : "circle.dashed").font(.caption).foregroundStyle(model.isConfigured ? .green : .secondary)
             }.padding(.horizontal, 14).padding(.top, 14)
 
-            Picker("View", selection: $model.tab) {
-                ForEach(DashboardModel.Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }.pickerStyle(.segmented).padding(.horizontal, 14).padding(.top, 11)
+            if showingSettings {
+                ConnectionSettings(model: model) { showingSettings = false }.padding(14)
+            } else {
+                Picker("View", selection: $model.tab) {
+                    ForEach(DashboardModel.Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }.pickerStyle(.segmented).padding(.horizontal, 14).padding(.top, 11)
 
-            ScrollView {
-                switch model.tab {
-                case .overview: OverviewView(model: model)
-                case .accounts: AccountsView(model: model)
-                }
-            }.padding(14).scrollIndicators(.hidden)
+                ScrollView {
+                    switch model.tab {
+                    case .overview: OverviewView(model: model)
+                    case .accounts: AccountsView(model: model)
+                    }
+                }.padding(14).scrollIndicators(.hidden)
+            }
 
             Divider()
             HStack {
@@ -41,22 +45,44 @@ public struct PopoverView: View {
                 .foregroundStyle(.secondary)
                 .help("Quit Claude Code Proxy")
             }.font(.caption2).foregroundStyle(.secondary).padding(10)
-        }.background(.regularMaterial).sheet(isPresented: $showingSettings) { ConnectionSettings(model: model) }
+        }.background(.regularMaterial)
     }
 }
 
 private struct ConnectionSettings: View {
     @ObservedObject var model: DashboardModel
-    @Environment(\.dismiss) private var dismiss
+    @State private var baseURL: String
+    @State private var username: String
+    @State private var secret: String
+    let onClose: () -> Void
+
+    init(model: DashboardModel, onClose: @escaping () -> Void) {
+        self.model = model
+        self.onClose = onClose
+        _baseURL = State(initialValue: model.baseURL)
+        _username = State(initialValue: model.username)
+        _secret = State(initialValue: model.secret)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Connection").font(.title3.bold())
             Text("Connect this menu-bar app to any compatible proxy. Values are stored locally; the secret is kept in the macOS Keychain.").font(.caption).foregroundStyle(.secondary)
-            TextField("Base URL", text: $model.baseURL).textFieldStyle(.roundedBorder)
-            TextField("Username (optional)", text: $model.username).textFieldStyle(.roundedBorder)
-            SecureField("API key or password", text: $model.secret).textFieldStyle(.roundedBorder)
-            HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Button("Save") { model.saveConnection(); dismiss() }.buttonStyle(.borderedProminent).tint(.orange).keyboardShortcut(.defaultAction) }
-        }.padding(20).frame(width: 380)
+            TextField("Base URL", text: $baseURL).textFieldStyle(.roundedBorder)
+            TextField("Username (optional)", text: $username).textFieldStyle(.roundedBorder)
+            SecureField("API key or password", text: $secret).textFieldStyle(.roundedBorder)
+            HStack {
+                Spacer()
+                Button("Cancel", action: onClose).keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    model.baseURL = baseURL
+                    model.username = username
+                    model.secret = secret
+                    model.saveConnection()
+                    onClose()
+                }.buttonStyle(.borderedProminent).tint(.orange).keyboardShortcut(.defaultAction)
+            }
+        }
     }
 }
 
