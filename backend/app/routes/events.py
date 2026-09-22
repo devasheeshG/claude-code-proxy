@@ -78,9 +78,13 @@ def list_events(
                 metadata = {"raw": row.metadata_json}
         usage_row = usage_by_request.get(row.request_id)
         if usage_row is not None:
+            # Preserve the model routed by the proxy. Providers can report a
+            # different internal/alias model in response usage; exposing that
+            # as the routed model makes a provider discrepancy look like a
+            # user-scoped override.
             metadata = {
                 **metadata,
-                "model": usage_row.model,
+                "upstream_response_model": usage_row.model,
                 "input_tokens": usage_row.input_tokens,
                 "output_tokens": usage_row.output_tokens,
                 "cached_input_tokens": usage_row.cache_read_input_tokens,

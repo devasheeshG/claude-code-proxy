@@ -774,6 +774,65 @@ def test_stats_endpoints_reflect_usage(client, admin_headers, seed_account, make
     assert client.get("/api/v1/stats/hourly", headers=admin_headers).status_code == 200
 
 
+@respx.mock
+def test_events_and_model_mix_keep_routed_model_when_provider_reports_alias(
+    client,
+    admin_headers,
+    seed_account,
+    make_user,
+):
+    from app.utils.postgres import UsageRecordDb
+    from app.utils.postgres.base import SessionFactory
+
+    seed_account("model-alias-account")
+    key = make_user("model-alias-user")
+    respx.route(host="testserver").pass_through()
+    respx.post(ANTHROPIC_MESSAGES).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "model": "claude-sonnet-4-5",
+                "usage": {"input_tokens": 10, "output_tokens": 2},
+            },
+        )
+    )
+
+    proxied = client.post(
+        "/api/v1/messages",
+        headers={"Authorization": f"Bearer {key}"},
+        json={"model": "claude-sonnet-4-5", "messages": []},
+    )
+    assert proxied.status_code == 200, proxied.text
+
+    with SessionFactory() as db:
+        usage_row = db.query(UsageRecordDb).one()
+        request_id = usage_row.request_id
+        usage_row.model = "claude-haiku-4-5"
+        db.commit()
+
+    events_response = client.get(
+        "/api/v1/events",
+        headers=admin_headers,
+        params={"request_id": request_id},
+    )
+    assert events_response.status_code == 200, events_response.text
+    returned = next(event for event in events_response.json()["events"] if event["event_type"] == "response.returned")
+    assert returned["metadata"]["model"] == "claude-sonnet-4-5"
+    assert returned["metadata"]["requested_model"] == "claude-sonnet-4-5"
+    assert returned["metadata"]["upstream_response_model"] == "claude-haiku-4-5"
+
+    model_mix = client.get("/api/v1/stats/model-mix", headers=admin_headers)
+    assert model_mix.status_code == 200, model_mix.text
+    assert model_mix.json()["users"][0]["models"] == [
+        {
+            "model": "claude-sonnet-4-5",
+            "requests": 1,
+            "input_tokens": 10,
+            "output_tokens": 2,
+        }
+    ]
+
+
 def test_overview_aggregates_active_pool_capacity(client, admin_headers, seed_account):
     from app.utils.models.api import AccountStatus, ProviderHealth
     from app.utils.postgres import AccountDb
