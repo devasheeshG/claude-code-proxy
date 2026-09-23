@@ -858,21 +858,28 @@ def test_overview_aggregates_active_pool_capacity(client, admin_headers, seed_ac
         weekly_used_pct=0.2,
         rotation_threshold=0.9,
     )
+    cooldown_id = seed_account(
+        "cooldown",
+        status=AccountStatus.COOLDOWN,
+        session_used_pct=0.5,
+        weekly_used_pct=0.2,
+        rotation_threshold=0.4,
+    )
     reauth_id = seed_account("reauth-required", session_used_pct=0.2, weekly_used_pct=0.1)
 
     with SessionFactory() as db:
-        db.query(AccountDb).filter(AccountDb.id.in_([*usable_ids, disabled_id, exhausted_id])).update(
+        db.query(AccountDb).filter(AccountDb.id.in_([*usable_ids, disabled_id, exhausted_id, cooldown_id])).update(
             {AccountDb.provider_health: ProviderHealth.HEALTHY}
         )
         db.query(AccountDb).filter(AccountDb.id == reauth_id).update({AccountDb.provider_health: ProviderHealth.REAUTH_REQUIRED})
         db.commit()
 
     overview = client.get("/api/v1/stats/overview", headers=admin_headers).json()
-    assert overview["total_accounts"] == 5
-    assert overview["active_accounts"] == 3
+    assert overview["total_accounts"] == 6
+    assert overview["active_accounts"] == 4
     assert overview["usable_accounts"] == 2
-    assert overview["pool_used_pct"] == 0.516667
-    assert overview["pool_remaining_pct"] == 0.483333
+    assert overview["pool_used_pct"] == 0.5125
+    assert overview["pool_remaining_pct"] == 0.4875
 
 
 def test_user_scoped_stats_hide_unselected_users(client, admin_headers, make_user):
