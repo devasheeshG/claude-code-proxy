@@ -118,6 +118,7 @@ Sonnet, Haiku, Opus, and Fable families:
 | `claude-opus-4-6` | Opus |
 | `claude-opus-4-8` | Opus |
 | `claude-opus-5` | Opus |
+| `claude-opus-5-5` | Opus |
 | `claude-sonnet-5` | Sonnet |
 
 Exact model rewrites are rendered in events as `target (requested)`.
