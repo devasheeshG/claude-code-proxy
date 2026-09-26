@@ -175,6 +175,9 @@ updates inherited fields across its users. A user can override individual
 fields and reset them to the preset. New and upgraded installations create a
 **Current configuration** preset and assign existing users without changing
 their effective policies.
+The Edit User dialog places preset selection after usage budgets. Preset-owned
+model access and rewrites are managed in the preset; user-specific thinking
+and mode overrides appear only when explicitly enabled.
 
 Users use the same card language as accounts. Cards show priority, active state,
 request mode, thinking levels, allowed models, model rewrites, API-key count,

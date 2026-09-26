@@ -2,6 +2,7 @@
 # Description: API tests for admin auth, user management, and the proxy path (non-streaming, streaming, failover).
 
 import json
+import uuid
 
 import httpx
 import respx
@@ -48,6 +49,23 @@ def test_presets_inherit_and_preserve_user_overrides(client, admin_headers):
     assert reset.json()["user"]["allowed_thinking_levels"] == ["max"]
     assert reset.json()["user"]["preset_overrides"] == []
     assert client.delete(f"/api/v1/presets/{preset_id}", headers=admin_headers).status_code == 409
+
+
+def test_user_policy_edit_is_atomic_with_preset_assignment(client, admin_headers):
+    first = client.post("/api/v1/presets", headers=admin_headers, json={"name": "First", "allowed_thinking_modes": ["disabled"]}).json()
+    second = client.post("/api/v1/presets", headers=admin_headers, json={"name": "Second", "allowed_thinking_modes": ["enabled"]}).json()
+    user = client.post("/api/v1/users", headers=admin_headers, json={"name": "atomic", "preset_id": first["id"]}).json()["user"]
+    path = f"/api/v1/users/{user['id']}"
+    failed = client.put(path, headers=admin_headers, json={"preset_id": str(uuid.uuid4()), "name": "changed"})
+    assert failed.status_code == 404
+    assert client.get("/api/v1/users", headers=admin_headers).json()["users"][0]["name"] == "atomic"
+    changed = client.put(path, headers=admin_headers, json={"preset_id": second["id"], "name": "changed", "allowed_thinking_modes": ["disabled"]})
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["user"]["preset_id"] == second["id"]
+    assert changed.json()["user"]["preset_overrides"] == ["allowed_thinking_modes"]
+    reset = client.put(path, headers=admin_headers, json={"clear_preset_overrides": ["allowed_thinking_modes"]})
+    assert reset.status_code == 200, reset.text
+    assert reset.json()["user"]["allowed_thinking_modes"] == ["enabled"]
 
 
 def test_preset_migration_preserves_existing_user_policies(client, admin_headers):

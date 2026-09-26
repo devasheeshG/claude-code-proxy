@@ -10,12 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, ChevronRight, KeyRound, ListChecks, Pencil, Search, Trash2 } from "lucide-react";
 import { api, API_BASE_URL, ApiError } from "@/lib/api";
 import { ApiKey, THINKING_LEVELS, ThinkingLevel, ThinkingMode, User, Preset } from "@/lib/types";
-import {
-    ModelAccessEditor,
-    ModelRulesEditor,
-    PresetsPanel,
-    ThinkingModesEditor,
-} from "@/components/presets-panel";
+import { ModelRulesEditor, PresetsPanel, ThinkingModesEditor } from "@/components/presets-panel";
 import { formatDateTime, formatNumber, formatTokens, formatUsd } from "@/lib/format";
 import {
     Badge,
@@ -29,6 +24,7 @@ import {
     Field,
     LoadingState,
     Modal,
+    SelectMenu,
     Spinner,
     StatusToggle,
     TextInput,
@@ -147,81 +143,6 @@ function MonthlyUsage({ user }: { user: User }) {
                 Resets {formatDateTime(user.monthly_reset_at)}
             </div>
         </div>
-    );
-}
-
-function ModelOverrideEditor({
-    value,
-    onChange,
-}: {
-    value: Record<string, string>;
-    onChange: (value: Record<string, string>) => void;
-}) {
-    const entries = Object.entries(value);
-    const [source, setSource] = useState("");
-    const [target, setTarget] = useState("");
-    const add = () => {
-        const from = source.trim().toLowerCase();
-        const to = target.trim().toLowerCase();
-        if (!from || !to || from === to) return;
-        onChange({ ...value, [from]: to });
-        setSource("");
-        setTarget("");
-    };
-    return (
-        <Field
-            label="Server-side model rewrites"
-            hint="Exact, case-insensitive requested model → upstream Claude model mappings for this user."
-        >
-            <div className="space-y-2">
-                {entries.map(([from, to]) => (
-                    <div
-                        key={from}
-                        className="border-ink-700 bg-ink-900/50 grid grid-cols-[1fr_auto_1fr_auto] items-center gap-2 rounded-md border px-3 py-2 text-xs"
-                    >
-                        <code className="text-fog-200 truncate">{from}</code>
-                        <span className="text-fog-500">→</span>
-                        <code className="text-brand-300 truncate">{to}</code>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                const next = { ...value };
-                                delete next[from];
-                                onChange(next);
-                            }}
-                            className="text-fog-400 hover:text-bad-500"
-                            aria-label={`Remove ${from} rewrite`}
-                        >
-                            <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                    </div>
-                ))}
-                <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-                    <TextInput
-                        value={source}
-                        onChange={(e) => setSource(e.target.value)}
-                        placeholder="requested model"
-                    />
-                    <TextInput
-                        value={target}
-                        onChange={(e) => setTarget(e.target.value)}
-                        placeholder="upstream model"
-                    />
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={add}
-                        disabled={
-                            !source.trim() ||
-                            !target.trim() ||
-                            source.trim().toLowerCase() === target.trim().toLowerCase()
-                        }
-                    >
-                        Add rewrite
-                    </Button>
-                </div>
-            </div>
-        </Field>
     );
 }
 
@@ -808,13 +729,6 @@ export default function UsersPage() {
 
                                                             {expanded ? (
                                                                 <div className="border-ink-700 bg-ink-900/40 border-t p-4 sm:px-6">
-                                                                    <PresetAssignment
-                                                                        user={user}
-                                                                        presets={presets}
-                                                                        onChanged={() =>
-                                                                            void load(true)
-                                                                        }
-                                                                    />
                                                                     <KeysPanel
                                                                         user={user}
                                                                         onChanged={() =>
@@ -853,7 +767,6 @@ export default function UsersPage() {
             {showCreate ? (
                 <CreateUserModal
                     presets={presets}
-                    modelOptions={modelOptions}
                     onClose={() => setShowCreate(false)}
                     onCreated={(user) => {
                         setShowCreate(false);
@@ -906,96 +819,6 @@ export default function UsersPage() {
 // ---------------------------------------------------------------------------
 // Per-user key management panel (shown when a user card is expanded).
 // ---------------------------------------------------------------------------
-
-function PresetAssignment({
-    user,
-    presets,
-    onChanged,
-}: {
-    user: User;
-    presets: Preset[];
-    onChanged: () => void;
-}) {
-    const [busy, setBusy] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const assign = async (presetId: string) => {
-        setBusy(true);
-        setError(null);
-        try {
-            await api.assignUserPreset(user.id, presetId);
-            onChanged();
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "Could not assign preset");
-        } finally {
-            setBusy(false);
-        }
-    };
-    const clear = async (field: string) => {
-        setBusy(true);
-        setError(null);
-        try {
-            await api.clearUserPresetOverride(user.id, field);
-            onChanged();
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "Could not clear override");
-        } finally {
-            setBusy(false);
-        }
-    };
-    return (
-        <div className="border-ink-700 mb-4 rounded-lg border p-3 sm:p-4">
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-                <Field
-                    label="Policy preset"
-                    hint="Changing presets replaces the baseline and clears user overrides."
-                >
-                    <select
-                        aria-label={`Policy preset for ${user.name}`}
-                        value={user.preset_id ?? ""}
-                        disabled={busy}
-                        onChange={(event) => void assign(event.target.value)}
-                        className="border-ink-700 bg-ink-900 text-fog-100 w-full min-w-0 rounded-md border px-3 py-2 text-sm"
-                    >
-                        <option value="" disabled>
-                            No preset
-                        </option>
-                        {presets.map((preset) => (
-                            <option key={preset.id} value={preset.id}>
-                                {preset.name}
-                            </option>
-                        ))}
-                    </select>
-                </Field>
-                <span className="text-fog-400 pb-2 text-xs">
-                    {user.preset_overrides.length
-                        ? `${user.preset_overrides.length} user override${user.preset_overrides.length === 1 ? "" : "s"}`
-                        : "Fully inherited"}
-                </span>
-            </div>
-            {user.preset_overrides.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                    {user.preset_overrides.map((field) => (
-                        <button
-                            type="button"
-                            key={field}
-                            disabled={busy}
-                            onClick={() => void clear(field)}
-                            title="Reset this field to the preset"
-                            className="border-brand-500/30 bg-brand-500/10 text-brand-300 hover:bg-brand-500/20 rounded-md border px-2 py-1 text-xs"
-                        >
-                            {field.replaceAll("_", " ")} · reset
-                        </button>
-                    ))}
-                </div>
-            )}
-            {error && (
-                <p role="alert" className="text-bad-500 mt-2 text-xs">
-                    {error}
-                </p>
-            )}
-        </div>
-    );
-}
 
 function KeysPanel({
     user,
@@ -1347,12 +1170,10 @@ function EditKeyModal({
 
 function CreateUserModal({
     presets,
-    modelOptions,
     onClose,
     onCreated,
 }: {
     presets: Preset[];
-    modelOptions: string[];
     onClose: () => void;
     onCreated: (user: User) => void;
 }) {
@@ -1365,24 +1186,6 @@ function CreateUserModal({
     const [monthlySpend, setMonthlySpend] = useState("");
     const [lifetimeSpend, setLifetimeSpend] = useState("");
     const [presetId, setPresetId] = useState(presets[0]?.id ?? "");
-    const [modelOverrides, setModelOverrides] = useState<Record<string, string>>(
-        presets[0]?.model_overrides ?? {},
-    );
-    const [allowedThinkingLevels, setAllowedThinkingLevels] = useState<ThinkingLevel[]>(
-        presets[0]?.allowed_thinking_levels ?? [...THINKING_LEVELS],
-    );
-    const [allowedModels, setAllowedModels] = useState<string[] | null>(
-        presets[0]?.allowed_models ?? null,
-    );
-    const [allowedModes, setAllowedModes] = useState<ThinkingMode[]>(
-        presets[0]?.allowed_thinking_modes ?? ["disabled", "enabled", "adaptive"],
-    );
-    const [modelLevels, setModelLevels] = useState<Record<string, ThinkingLevel[]>>(
-        presets[0]?.model_thinking_levels ?? {},
-    );
-    const [modelModes, setModelModes] = useState<Record<string, ThinkingMode[]>>(
-        presets[0]?.model_thinking_modes ?? {},
-    );
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -1399,13 +1202,7 @@ function CreateUserModal({
                 lifetime_token_budget: parseLimitInput(lifetimeBudget),
                 monthly_spend_budget_usd: parseMoneyInput(monthlySpend),
                 lifetime_spend_budget_usd: parseMoneyInput(lifetimeSpend),
-                model_overrides: modelOverrides,
-                allowed_thinking_levels: allowedThinkingLevels,
                 preset_id: presetId || undefined,
-                allowed_models: allowedModels,
-                allowed_thinking_modes: allowedModes,
-                model_thinking_levels: modelLevels,
-                model_thinking_modes: modelModes,
             });
             onCreated(user);
         } catch (err) {
@@ -1419,31 +1216,21 @@ function CreateUserModal({
             <form onSubmit={submit} className="space-y-4">
                 <Field
                     label="Policy preset"
-                    hint="Baseline for this user. Customize any setting below."
+                    hint="This user's model and request policy comes from the preset."
                 >
-                    <select
+                    <SelectMenu
                         value={presetId}
-                        onChange={(event) => {
-                            const next = presets.find((preset) => preset.id === event.target.value);
-                            setPresetId(event.target.value);
-                            if (next) {
-                                setModelOverrides(next.model_overrides);
-                                setAllowedThinkingLevels(next.allowed_thinking_levels);
-                                setAllowedModels(next.allowed_models);
-                                setAllowedModes(next.allowed_thinking_modes);
-                                setModelLevels(next.model_thinking_levels);
-                                setModelModes(next.model_thinking_modes);
-                            }
-                        }}
-                        className="border-ink-700 bg-ink-900 text-fog-100 w-full rounded-md border px-3 py-2 text-sm"
-                    >
-                        {presets.length === 0 && <option value="">No presets available</option>}
-                        {presets.map((preset) => (
-                            <option key={preset.id} value={preset.id}>
-                                {preset.name}
-                            </option>
-                        ))}
-                    </select>
+                        ariaLabel="Policy preset for new user"
+                        onChange={setPresetId}
+                        options={
+                            presets.length
+                                ? presets.map((preset) => ({
+                                      value: preset.id,
+                                      label: preset.name,
+                                  }))
+                                : [{ value: "", label: "No presets available" }]
+                        }
+                    />
                 </Field>
                 <Field label="Name" hint="Issue one or more API keys after creating the user.">
                     <TextInput
@@ -1468,11 +1255,12 @@ function CreateUserModal({
                             onChange={(e) => setPriority(e.target.value)}
                         />
                     </Field>
-                    <label className="text-fog-300 flex items-center gap-2 pt-7 text-sm">
+                    <label className="border-ink-700 bg-ink-900/50 text-fog-200 flex items-center gap-2.5 rounded-md border px-3 py-2.5 text-sm sm:mt-6">
                         <input
                             type="checkbox"
                             checked={fallbackEnabled}
                             onChange={(e) => setFallbackEnabled(e.target.checked)}
+                            className="accent-brand-500 h-4 w-4 shrink-0"
                         />
                         Allow API fallback providers
                     </label>
@@ -1534,33 +1322,6 @@ function CreateUserModal({
                     </Field>
                 </div>
 
-                <ThinkingLevelSelector
-                    value={allowedThinkingLevels}
-                    onChange={setAllowedThinkingLevels}
-                />
-
-                <Field label="Allowed models">
-                    <ModelAccessEditor
-                        models={modelOptions}
-                        value={allowedModels}
-                        onChange={setAllowedModels}
-                    />
-                </Field>
-                <Field label="Allowed thinking modes">
-                    <ThinkingModesEditor value={allowedModes} onChange={setAllowedModes} />
-                </Field>
-                <Field label="Per-model thinking rules">
-                    <ModelRulesEditor
-                        models={modelOptions}
-                        levels={modelLevels}
-                        modes={modelModes}
-                        onLevels={setModelLevels}
-                        onModes={setModelModes}
-                    />
-                </Field>
-
-                <ModelOverrideEditor value={modelOverrides} onChange={setModelOverrides} />
-
                 {error ? (
                     <div
                         role="alert"
@@ -1574,19 +1335,7 @@ function CreateUserModal({
                     <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>
                         Cancel
                     </Button>
-                    <Button
-                        type="submit"
-                        variant="primary"
-                        disabled={
-                            submitting ||
-                            !name.trim() ||
-                            !allowedThinkingLevels.length ||
-                            !allowedModes.length ||
-                            (allowedModels !== null && !allowedModels.length) ||
-                            Object.values(modelLevels).some((items) => !items.length) ||
-                            Object.values(modelModes).some((items) => !items.length)
-                        }
-                    >
+                    <Button type="submit" variant="primary" disabled={submitting || !name.trim()}>
                         {submitting ? <Spinner /> : null}
                         Create
                     </Button>
@@ -1632,13 +1381,21 @@ function EditUserModal({
     const [lifetimeSpend, setLifetimeSpend] = useState(
         user.lifetime_spend_budget_usd ? String(user.lifetime_spend_budget_usd) : "",
     );
-    const [modelOverrides, setModelOverrides] = useState<Record<string, string>>({
+    const [selectedPresetId, setSelectedPresetId] = useState(user.preset_id ?? "");
+    const [overrideFields, setOverrideFields] = useState<string[]>(user.preset_overrides);
+    const toggleOverride = (field: string) =>
+        setOverrideFields((current) =>
+            current.includes(field)
+                ? current.filter((item) => item !== field)
+                : [...current, field],
+        );
+    const [modelOverrides] = useState<Record<string, string>>({
         ...user.model_overrides,
     });
     const [allowedThinkingLevels, setAllowedThinkingLevels] = useState<ThinkingLevel[]>(
         user.allowed_thinking_levels,
     );
-    const [allowedModels, setAllowedModels] = useState<string[] | null>(user.allowed_models);
+    const [allowedModels] = useState<string[] | null>(user.allowed_models);
     const [allowedModes, setAllowedModes] = useState<ThinkingMode[]>(user.allowed_thinking_modes);
     const [modelLevels, setModelLevels] = useState<Record<string, ThinkingLevel[]>>(
         user.model_thinking_levels,
@@ -1654,7 +1411,12 @@ function EditUserModal({
         setError(null);
         setSubmitting(true);
         try {
+            const presetChanged = selectedPresetId !== (user.preset_id ?? "");
             const updated = await api.updateUser(user.id, {
+                ...(presetChanged && selectedPresetId ? { preset_id: selectedPresetId } : {}),
+                clear_preset_overrides: presetChanged
+                    ? []
+                    : user.preset_overrides.filter((field) => !overrideFields.includes(field)),
                 name: name.trim(),
                 active,
                 priority: Number(priority) || 1,
@@ -1664,12 +1426,24 @@ function EditUserModal({
                 lifetime_token_budget: parseLimitInput(lifetimeBudget) ?? 0,
                 monthly_spend_budget_usd: parseMoneyInput(monthlySpend) ?? 0,
                 lifetime_spend_budget_usd: parseMoneyInput(lifetimeSpend) ?? 0,
-                model_overrides: modelOverrides,
-                allowed_thinking_levels: allowedThinkingLevels,
-                allowed_models: allowedModels,
-                allowed_thinking_modes: allowedModes,
-                model_thinking_levels: modelLevels,
-                model_thinking_modes: modelModes,
+                ...(overrideFields.includes("model_overrides")
+                    ? { model_overrides: modelOverrides }
+                    : {}),
+                ...(overrideFields.includes("allowed_thinking_levels")
+                    ? { allowed_thinking_levels: allowedThinkingLevels }
+                    : {}),
+                ...(overrideFields.includes("allowed_models")
+                    ? { allowed_models: allowedModels }
+                    : {}),
+                ...(overrideFields.includes("allowed_thinking_modes")
+                    ? { allowed_thinking_modes: allowedModes }
+                    : {}),
+                ...(overrideFields.includes("model_thinking_levels")
+                    ? { model_thinking_levels: modelLevels }
+                    : {}),
+                ...(overrideFields.includes("model_thinking_modes")
+                    ? { model_thinking_modes: modelModes }
+                    : {}),
             });
             onSaved(updated);
         } catch (err) {
@@ -1681,11 +1455,6 @@ function EditUserModal({
     return (
         <Modal title={`Edit ${user.name}`} onClose={onClose} widthClass="max-w-3xl">
             <form onSubmit={submit} className="space-y-4">
-                <p className="border-ink-700 bg-ink-950/40 text-fog-400 rounded-md border px-3 py-2 text-xs">
-                    Preset: {presets.find((preset) => preset.id === user.preset_id)?.name ?? "None"}
-                    . Values changed below become user overrides. To assign another preset or reset
-                    a field, expand this user&apos;s card.
-                </p>
                 <Field label="Name">
                     <TextInput value={name} onChange={(e) => setName(e.target.value)} required />
                 </Field>
@@ -1703,11 +1472,12 @@ function EditUserModal({
                             onChange={(e) => setPriority(e.target.value)}
                         />
                     </Field>
-                    <label className="text-fog-300 flex items-center gap-2 pt-7 text-sm">
+                    <label className="border-ink-700 bg-ink-900/50 text-fog-200 flex items-center gap-2.5 rounded-md border px-3 py-2.5 text-sm sm:mt-6">
                         <input
                             type="checkbox"
                             checked={fallbackEnabled}
                             onChange={(e) => setFallbackEnabled(e.target.checked)}
+                            className="accent-brand-500 h-4 w-4 shrink-0"
                         />
                         Allow API fallback providers
                     </label>
@@ -1778,32 +1548,91 @@ function EditUserModal({
                     </Field>
                 </div>
 
-                <ThinkingLevelSelector
-                    value={allowedThinkingLevels}
-                    onChange={setAllowedThinkingLevels}
-                />
-
-                <Field label="Allowed models">
-                    <ModelAccessEditor
-                        models={modelOptions}
-                        value={allowedModels}
-                        onChange={setAllowedModels}
+                <Field
+                    label="Policy preset"
+                    hint="Use a preset baseline, or enable specific user overrides below."
+                >
+                    <SelectMenu
+                        value={selectedPresetId}
+                        ariaLabel="Policy preset"
+                        onChange={(value) => {
+                            if (
+                                value !== selectedPresetId &&
+                                overrideFields.length > 0 &&
+                                !window.confirm(
+                                    "Changing presets will clear this user's policy overrides. Continue?",
+                                )
+                            )
+                                return;
+                            const preset = presets.find((item) => item.id === value);
+                            setSelectedPresetId(value);
+                            setOverrideFields([]);
+                            if (preset) {
+                                setAllowedThinkingLevels(preset.allowed_thinking_levels);
+                                setAllowedModes(preset.allowed_thinking_modes);
+                                setModelLevels(preset.model_thinking_levels);
+                                setModelModes(preset.model_thinking_modes);
+                            }
+                        }}
+                        options={presets.map((preset) => ({
+                            value: preset.id,
+                            label: preset.name,
+                        }))}
                     />
                 </Field>
-                <Field label="Allowed thinking modes">
-                    <ThinkingModesEditor value={allowedModes} onChange={setAllowedModes} />
-                </Field>
-                <Field label="Per-model thinking rules">
-                    <ModelRulesEditor
-                        models={modelOptions}
-                        levels={modelLevels}
-                        modes={modelModes}
-                        onLevels={setModelLevels}
-                        onModes={setModelModes}
-                    />
-                </Field>
+                {selectedPresetId && (
+                    <div className="border-ink-700 bg-ink-950/30 space-y-3 rounded-lg border p-4">
+                        <div className="text-fog-200 text-sm font-medium">User overrides</div>
+                        {(
+                            [
+                                ["allowed_thinking_levels", "Thinking levels"],
+                                ["allowed_thinking_modes", "Thinking modes"],
+                                ["model_thinking_levels", "Per-model thinking levels"],
+                                ["model_thinking_modes", "Per-model thinking modes"],
+                            ] as const
+                        ).map(([field, label]) => (
+                            <label
+                                key={field}
+                                className="text-fog-200 flex items-center gap-2.5 text-sm"
+                            >
+                                <input
+                                    type="checkbox"
+                                    checked={overrideFields.includes(field)}
+                                    onChange={() => toggleOverride(field)}
+                                    className="accent-brand-500 h-4 w-4"
+                                />
+                                Override {label.toLowerCase()}
+                            </label>
+                        ))}
+                    </div>
+                )}
 
-                <ModelOverrideEditor value={modelOverrides} onChange={setModelOverrides} />
+                {overrideFields.includes("allowed_thinking_levels") && (
+                    <ThinkingLevelSelector
+                        value={allowedThinkingLevels}
+                        onChange={setAllowedThinkingLevels}
+                    />
+                )}
+
+                {overrideFields.includes("allowed_thinking_modes") && (
+                    <Field label="Allowed thinking modes">
+                        <ThinkingModesEditor value={allowedModes} onChange={setAllowedModes} />
+                    </Field>
+                )}
+                {(overrideFields.includes("model_thinking_levels") ||
+                    overrideFields.includes("model_thinking_modes")) && (
+                    <Field label="Per-model thinking rules">
+                        <ModelRulesEditor
+                            models={modelOptions}
+                            levels={modelLevels}
+                            modes={modelModes}
+                            onLevels={setModelLevels}
+                            onModes={setModelModes}
+                            showLevels={overrideFields.includes("model_thinking_levels")}
+                            showModes={overrideFields.includes("model_thinking_modes")}
+                        />
+                    </Field>
+                )}
 
                 <label className="border-ink-700 bg-ink-900/50 flex items-center gap-2.5 rounded-md border px-3 py-2.5">
                     <input

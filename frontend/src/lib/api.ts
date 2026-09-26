@@ -549,6 +549,8 @@ export const api = {
         id: string,
         patch: {
             name?: string;
+            preset_id?: string;
+            clear_preset_overrides?: string[];
             active?: boolean;
             priority?: number;
             fallback_enabled?: boolean;

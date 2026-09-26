@@ -237,6 +237,8 @@ class CreateUserRequest(BaseModel):
 class UpdateUserRequest(BaseModel):
     # Omitted fields are left unchanged. For the numeric limits, send 0 to clear a limit (unlimited).
     name: Optional[str] = None
+    preset_id: Optional[uuid.UUID] = None
+    clear_preset_overrides: List[str] = Field(default_factory=list)
     active: Optional[bool] = None
     priority: Optional[int] = Field(default=None, ge=1, le=1000)
     fallback_enabled: Optional[bool] = None
