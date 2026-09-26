@@ -132,6 +132,14 @@ class UserDb(DatabaseBase):
     )
     # Requested model ID -> upstream model ID, scoped to this user.
     model_overrides_json = Column(Text, nullable=False, default="{}", server_default="{}")
+    allowed_models_json = Column(Text, nullable=True)
+    preset_id = Column(UUID(as_uuid=True), nullable=True)
+    preset_overrides_json = Column(Text, nullable=False, default="[]", server_default="[]")
+    model_thinking_levels_json = Column(Text, nullable=False, default="{}", server_default="{}")
+    allowed_thinking_modes_json = Column(
+        Text, nullable=False, default='["disabled","enabled","adaptive"]', server_default='["disabled","enabled","adaptive"]'
+    )
+    model_thinking_modes_json = Column(Text, nullable=False, default="{}", server_default="{}")
     created_at = Column(DateTime(timezone=True), nullable=False)
     last_used_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -142,6 +150,20 @@ class UserDb(DatabaseBase):
 
     def __repr__(self):
         return f"<User(id={self.id}, name={self.name})>"
+
+
+class PresetDb(DatabaseBase):
+    __tablename__ = "presets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    name = Column(VARCHAR(120), nullable=False, unique=True)
+    allowed_models_json = Column(Text, nullable=True)
+    allowed_thinking_levels = Column(ARRAY(VARCHAR), nullable=False, server_default="{low,medium,high,max}")
+    model_overrides_json = Column(Text, nullable=False, server_default="{}")
+    model_thinking_levels_json = Column(Text, nullable=False, server_default="{}")
+    allowed_thinking_modes_json = Column(Text, nullable=False, server_default='["disabled","enabled","adaptive"]')
+    model_thinking_modes_json = Column(Text, nullable=False, server_default="{}")
+    created_at = Column(DateTime(timezone=True), nullable=False)
 
 
 class DashboardMemberDb(DatabaseBase):

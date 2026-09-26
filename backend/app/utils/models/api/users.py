@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 from typing import Dict, List, Literal, Optional
@@ -10,10 +11,36 @@ from typing import Dict, List, Literal, Optional
 from fastapi import Query
 from pydantic import BaseModel, Field, field_validator
 
+from app.model_catalog import configured_model_ids
 from app.utils import request_policy
 from app.utils.thinking import THINKING_LEVELS
 
 ThinkingLevel = Literal["low", "medium", "high", "max"]
+ThinkingMode = Literal["disabled", "enabled", "adaptive"]
+
+
+def _normalize_model_values(values):
+    if values is None:
+        return None
+    if not isinstance(values, list) or any(not isinstance(value, str) or not value.strip() for value in values):
+        raise ValueError("Model IDs must be non-empty strings")
+    result = sorted({value.strip().lower() for value in values})
+    invalid = sorted(set(result) - set(configured_model_ids()))
+    if invalid:
+        raise ValueError(f"Unknown model IDs: {', '.join(invalid)}")
+    return result
+
+
+def _normalize_model_matrix(values, allowed):
+    if not isinstance(values, dict):
+        return values
+    result = {}
+    for model, choices in values.items():
+        name = _normalize_model_values([model])[0]
+        if not isinstance(choices, list) or not choices or any(choice not in allowed for choice in choices):
+            raise ValueError(f"Invalid choices for model {model}")
+        result[name] = list(dict.fromkeys(choices))
+    return result
 
 
 def _normalize_model_overrides(values):
@@ -28,6 +55,9 @@ def _normalize_model_overrides(values):
         raise ValueError("Model overrides must use unique model IDs and cannot map a model to itself")
     if any(source == target for source, target in normalized.items()):
         raise ValueError("Model overrides cannot map a model to itself")
+    invalid = sorted((set(normalized) | set(normalized.values())) - set(configured_model_ids()))
+    if invalid:
+        raise ValueError(f"Unknown model IDs: {', '.join(invalid)}")
     return normalized
 
 
@@ -47,6 +77,12 @@ class User(BaseModel):
     lifetime_spend_budget_usd: Optional[float]
     model_overrides: Dict[str, str]
     allowed_thinking_levels: List[ThinkingLevel]
+    allowed_models: Optional[List[str]]
+    allowed_thinking_modes: List[ThinkingMode]
+    model_thinking_levels: Dict[str, List[ThinkingLevel]]
+    model_thinking_modes: Dict[str, List[ThinkingMode]]
+    preset_id: Optional[uuid.UUID]
+    preset_overrides: List[str]
     last_used_at: Optional[datetime]
     created_at: datetime
     total_tokens: int
@@ -82,6 +118,12 @@ class User(BaseModel):
             lifetime_spend_budget_usd=user_db.lifetime_spend_budget_usd,
             model_overrides=request_policy.decode_model_overrides(user_db.model_overrides_json),
             allowed_thinking_levels=user_db.allowed_thinking_levels,
+            allowed_models=json.loads(user_db.allowed_models_json) if user_db.allowed_models_json else None,
+            allowed_thinking_modes=json.loads(user_db.allowed_thinking_modes_json),
+            model_thinking_levels=json.loads(user_db.model_thinking_levels_json or "{}"),
+            model_thinking_modes=json.loads(user_db.model_thinking_modes_json or "{}"),
+            preset_id=user_db.preset_id,
+            preset_overrides=json.loads(user_db.preset_overrides_json or "[]"),
             last_used_at=user_db.last_used_at,
             created_at=user_db.created_at,
             total_tokens=total_tokens,
@@ -160,11 +202,31 @@ class CreateUserRequest(BaseModel):
     monthly_spend_budget_usd: Optional[float] = Field(default=None, ge=0)
     lifetime_spend_budget_usd: Optional[float] = Field(default=None, ge=0)
     model_overrides: Dict[str, str] = Field(default_factory=dict)
+    preset_id: Optional[uuid.UUID] = None
+    allowed_models: Optional[List[str]] = Field(default=None, min_length=1)
+    allowed_thinking_modes: List[ThinkingMode] = Field(default_factory=lambda: ["disabled", "enabled", "adaptive"], min_length=1)
+    model_thinking_levels: Dict[str, List[ThinkingLevel]] = Field(default_factory=dict)
+    model_thinking_modes: Dict[str, List[ThinkingMode]] = Field(default_factory=dict)
 
     @field_validator("model_overrides", mode="before")
     @classmethod
     def normalize_overrides(cls, values):
         return _normalize_model_overrides(values)
+
+    @field_validator("allowed_models", mode="before")
+    @classmethod
+    def normalize_models(cls, values):
+        return _normalize_model_values(values)
+
+    @field_validator("model_thinking_levels", mode="before")
+    @classmethod
+    def normalize_level_matrix(cls, values):
+        return _normalize_model_matrix(values, THINKING_LEVELS)
+
+    @field_validator("model_thinking_modes", mode="before")
+    @classmethod
+    def normalize_mode_matrix(cls, values):
+        return _normalize_model_matrix(values, ("disabled", "enabled", "adaptive"))
 
     allowed_thinking_levels: List[ThinkingLevel] = Field(default_factory=lambda: list(THINKING_LEVELS))
 
@@ -184,11 +246,30 @@ class UpdateUserRequest(BaseModel):
     monthly_spend_budget_usd: Optional[float] = Field(default=None, ge=0)
     lifetime_spend_budget_usd: Optional[float] = Field(default=None, ge=0)
     model_overrides: Optional[Dict[str, str]] = None
+    allowed_models: Optional[List[str]] = Field(default=None, min_length=1)
+    allowed_thinking_modes: Optional[List[ThinkingMode]] = Field(default=None, min_length=1)
+    model_thinking_levels: Optional[Dict[str, List[ThinkingLevel]]] = None
+    model_thinking_modes: Optional[Dict[str, List[ThinkingMode]]] = None
 
     @field_validator("model_overrides", mode="before")
     @classmethod
     def normalize_overrides(cls, values):
         return _normalize_model_overrides(values)
+
+    @field_validator("allowed_models", mode="before")
+    @classmethod
+    def normalize_models(cls, values):
+        return _normalize_model_values(values)
+
+    @field_validator("model_thinking_levels", mode="before")
+    @classmethod
+    def normalize_level_matrix(cls, values):
+        return _normalize_model_matrix(values, THINKING_LEVELS)
+
+    @field_validator("model_thinking_modes", mode="before")
+    @classmethod
+    def normalize_mode_matrix(cls, values):
+        return _normalize_model_matrix(values, ("disabled", "enabled", "adaptive"))
 
     allowed_thinking_levels: Optional[List[ThinkingLevel]] = None
 

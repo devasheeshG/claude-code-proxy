@@ -333,6 +333,19 @@ export interface AnthropicFallback {
 
 export const THINKING_LEVELS = ["low", "medium", "high", "max"] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+export type ThinkingMode = "disabled" | "enabled" | "adaptive";
+
+export interface Preset {
+    id: string;
+    name: string;
+    user_count: number;
+    allowed_models: string[] | null;
+    allowed_thinking_levels: ThinkingLevel[];
+    allowed_thinking_modes: ThinkingMode[];
+    model_overrides: Record<string, string>;
+    model_thinking_levels: Record<string, ThinkingLevel[]>;
+    model_thinking_modes: Record<string, ThinkingMode[]>;
+}
 
 export interface User {
     id: string;
@@ -351,6 +364,12 @@ export interface User {
     model_overrides: Record<string, string>;
     // Explicit Claude effort levels this user may request.
     allowed_thinking_levels: ThinkingLevel[];
+    allowed_models: string[] | null;
+    allowed_thinking_modes: ThinkingMode[];
+    model_thinking_levels: Record<string, ThinkingLevel[]>;
+    model_thinking_modes: Record<string, ThinkingMode[]>;
+    preset_id: string | null;
+    preset_overrides: string[];
     last_used_at: string | null;
     created_at: string;
     total_tokens: number;

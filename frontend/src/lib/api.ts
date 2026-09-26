@@ -32,6 +32,8 @@ import {
     DashboardMember,
     UserLookup,
     User,
+    Preset,
+    ThinkingMode,
 } from "./types";
 
 // Serialise filter params (range bounds + optional user) to query params,
@@ -476,6 +478,32 @@ export const api = {
         const res = await request<{ models: string[] }>("/v1/users/model-options");
         return res.models;
     },
+    async presets(): Promise<Preset[]> {
+        const res = await request<{ presets: Preset[] }>("/v1/presets");
+        return res.presets;
+    },
+    createPreset(payload: Omit<Preset, "id" | "user_count">): Promise<Preset> {
+        return request<Preset>("/v1/presets", { method: "POST", body: payload });
+    },
+    updatePreset(id: string, payload: Omit<Preset, "id" | "user_count">): Promise<Preset> {
+        return request<Preset>(`/v1/presets/${id}`, { method: "PUT", body: payload });
+    },
+    deletePreset(id: string) {
+        return request<unknown>(`/v1/presets/${id}`, { method: "DELETE" });
+    },
+    async assignUserPreset(userId: string, presetId: string): Promise<User> {
+        const res = await request<{ user: User }>(`/v1/users/${userId}/preset`, {
+            method: "PUT",
+            body: { preset_id: presetId },
+        });
+        return res.user;
+    },
+    async clearUserPresetOverride(userId: string, field: string): Promise<User> {
+        const res = await request<{ user: User }>(`/v1/users/${userId}/preset-overrides/${field}`, {
+            method: "DELETE",
+        });
+        return res.user;
+    },
     async createUser(
         name: string,
         opts: {
@@ -488,6 +516,11 @@ export const api = {
             lifetime_spend_budget_usd?: number | null;
             model_overrides?: Record<string, string>;
             allowed_thinking_levels?: ThinkingLevel[];
+            preset_id?: string;
+            allowed_models?: string[] | null;
+            allowed_thinking_modes?: ThinkingMode[];
+            model_thinking_levels?: Record<string, ThinkingLevel[]>;
+            model_thinking_modes?: Record<string, ThinkingMode[]>;
         } = {},
     ): Promise<User> {
         const res = await request<{ user: User }>("/v1/users", {
@@ -503,6 +536,11 @@ export const api = {
                 lifetime_spend_budget_usd: opts.lifetime_spend_budget_usd ?? null,
                 model_overrides: opts.model_overrides ?? {},
                 allowed_thinking_levels: opts.allowed_thinking_levels,
+                preset_id: opts.preset_id,
+                allowed_models: opts.allowed_models,
+                allowed_thinking_modes: opts.allowed_thinking_modes,
+                model_thinking_levels: opts.model_thinking_levels,
+                model_thinking_modes: opts.model_thinking_modes,
             },
         });
         return res.user;
@@ -521,6 +559,10 @@ export const api = {
             lifetime_spend_budget_usd?: number;
             model_overrides?: Record<string, string>;
             allowed_thinking_levels?: ThinkingLevel[];
+            allowed_models?: string[] | null;
+            allowed_thinking_modes?: ThinkingMode[];
+            model_thinking_levels?: Record<string, ThinkingLevel[]>;
+            model_thinking_modes?: Record<string, ThinkingMode[]>;
         },
     ): Promise<User> {
         const res = await request<{ user: User }>(`/v1/users/${id}`, {

@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app import config
 from app.logger import get_logger
+from app.model_catalog import configured_model_ids
 from app.routes.me import build_pool_status
 from app.utils import (
     account_limiter,
@@ -660,6 +661,25 @@ async def proxy_messages(
 
     if user is not None and isinstance(parsed_request, dict) and request_model is not None:
         effective_model = _override_model(user, request_model)
+        configured = set(configured_model_ids())
+        if not isinstance(request_model, str) or request_model.strip().lower() not in configured:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown or disabled model '{request_model}'.")
+        if not isinstance(effective_model, str) or effective_model.strip().lower() not in configured:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid model redirect for '{request_model}'.")
+        allowed_models = json.loads(user.allowed_models_json) if user.allowed_models_json else None
+        if allowed_models is not None and request_model.strip().lower() not in allowed_models:
+            raise HTTPException(status_code=403, detail=f"Model '{request_model}' is not allowed for this user.")
+        requested_model_id = request_model.strip().lower()
+        thinking_payload = parsed_request.get("thinking")
+        thinking_mode = thinking_payload.get("type", "disabled") if isinstance(thinking_payload, dict) else "disabled"
+        if thinking_mode not in json.loads(user.allowed_thinking_modes_json):
+            raise HTTPException(status_code=403, detail=f"Thinking mode '{thinking_mode}' is not allowed for this user.")
+        model_modes = json.loads(user.model_thinking_modes_json or "{}")
+        if requested_model_id in model_modes and thinking_mode not in model_modes[requested_model_id]:
+            raise HTTPException(status_code=403, detail=f"Thinking mode '{thinking_mode}' is not allowed for model '{requested_model_id}'.")
+        model_levels = json.loads(user.model_thinking_levels_json or "{}")
+        if requested_model_id in model_levels and requested_thinking_level not in model_levels[requested_model_id]:
+            raise HTTPException(status_code=403, detail=f"Thinking level is not allowed for model '{requested_model_id}'.")
         if effective_model != request_model:
             parsed_request["model"] = effective_model
             body = json.dumps(parsed_request, separators=(",", ":")).encode()

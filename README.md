@@ -168,6 +168,14 @@ other settings.
 
 ![Users dashboard](docs/screenshots/users.png)
 
+The Users page manages reusable policy presets. A preset defines allowed
+models, global thinking levels and modes, exact model rewrites, and optional
+per-model thinking levels/modes. Assign one preset to each user; editing it
+updates inherited fields across its users. A user can override individual
+fields and reset them to the preset. New and upgraded installations create a
+**Current configuration** preset and assign existing users without changing
+their effective policies.
+
 Users use the same card language as accounts. Cards show priority, active state,
 request mode, thinking levels, allowed models, model rewrites, API-key count,
 all-time and current-month tokens/spend, and budgets. Drag-and-drop lanes and

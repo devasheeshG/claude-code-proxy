@@ -84,6 +84,20 @@ def upgrade() -> None:
     op.create_index("ix_accounts_priority", "accounts", ["priority"])
 
     op.create_table(
+        "presets",
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("name", sa.VARCHAR(length=120), nullable=False),
+        sa.Column("allowed_models_json", sa.Text(), nullable=True),
+        sa.Column("allowed_thinking_levels", postgresql.ARRAY(sa.VARCHAR()), nullable=False, server_default="{low,medium,high,max}"),
+        sa.Column("model_overrides_json", sa.Text(), nullable=False, server_default="{}"),
+        sa.Column("model_thinking_levels_json", sa.Text(), nullable=False, server_default="{}"),
+        sa.Column("allowed_thinking_modes_json", sa.Text(), nullable=False, server_default='["disabled","enabled","adaptive"]'),
+        sa.Column("model_thinking_modes_json", sa.Text(), nullable=False, server_default="{}"),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("id", name="pk_presets_id"),
+        sa.UniqueConstraint("name", name="uq_presets_name"),
+    )
+    op.create_table(
         "users",
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("name", sa.VARCHAR(), nullable=False),
@@ -104,6 +118,12 @@ def upgrade() -> None:
             server_default="{low,medium,high,max}",
         ),
         sa.Column("model_overrides_json", sa.Text(), nullable=False, server_default="{}"),
+        sa.Column("allowed_models_json", sa.Text(), nullable=True),
+        sa.Column("preset_id", sa.UUID(), nullable=True),
+        sa.Column("preset_overrides_json", sa.Text(), nullable=False, server_default="[]"),
+        sa.Column("model_thinking_levels_json", sa.Text(), nullable=False, server_default="{}"),
+        sa.Column("allowed_thinking_modes_json", sa.Text(), nullable=False, server_default='["disabled","enabled","adaptive"]'),
+        sa.Column("model_thinking_modes_json", sa.Text(), nullable=False, server_default="{}"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("last_used_at", sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint("id", name="pk_users_id"),
@@ -309,6 +329,7 @@ def downgrade() -> None:
     op.drop_table("dashboard_members")
     op.drop_table("api_keys")
     op.drop_table("users")
+    op.drop_table("presets")
     op.drop_table("accounts")
     provider_health_enum.drop(op.get_bind(), checkfirst=True)
     account_status_enum.drop(op.get_bind(), checkfirst=True)

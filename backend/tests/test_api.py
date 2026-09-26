@@ -9,6 +9,87 @@ import respx
 ANTHROPIC_MESSAGES = "https://api.anthropic.com/v1/messages"
 
 
+def test_presets_inherit_and_preserve_user_overrides(client, admin_headers):
+    preset = client.post(
+        "/api/v1/presets",
+        headers=admin_headers,
+        json={
+            "name": "Research",
+            "allowed_models": ["claude-sonnet-4-6"],
+            "allowed_thinking_levels": ["high"],
+            "allowed_thinking_modes": ["enabled"],
+            "model_thinking_levels": {"claude-sonnet-4-6": ["high"]},
+        },
+    )
+    assert preset.status_code == 201, preset.text
+    preset_id = preset.json()["id"]
+    user = client.post("/api/v1/users", headers=admin_headers, json={"name": "preset-user", "preset_id": preset_id})
+    assert user.status_code == 201, user.text
+    user_id = user.json()["user"]["id"]
+    assert user.json()["user"]["allowed_models"] == ["claude-sonnet-4-6"]
+    assert user.json()["user"]["allowed_thinking_modes"] == ["enabled"]
+    assert user.json()["user"]["preset_overrides"] == []
+
+    override = client.put(f"/api/v1/users/{user_id}", headers=admin_headers, json={"allowed_thinking_levels": ["low"]})
+    assert override.status_code == 200, override.text
+    assert override.json()["user"]["preset_overrides"] == ["allowed_thinking_levels"]
+
+    changed = client.put(
+        f"/api/v1/presets/{preset_id}",
+        headers=admin_headers,
+        json={"name": "Research", "allowed_models": ["claude-haiku-4-5"], "allowed_thinking_levels": ["max"], "allowed_thinking_modes": ["adaptive"]},
+    )
+    assert changed.status_code == 200, changed.text
+    listed = client.get("/api/v1/users", headers=admin_headers).json()["users"][0]
+    assert listed["allowed_models"] == ["claude-haiku-4-5"]
+    assert listed["allowed_thinking_levels"] == ["low"]
+    reset = client.delete(f"/api/v1/users/{user_id}/preset-overrides/allowed_thinking_levels", headers=admin_headers)
+    assert reset.status_code == 200
+    assert reset.json()["user"]["allowed_thinking_levels"] == ["max"]
+    assert reset.json()["user"]["preset_overrides"] == []
+    assert client.delete(f"/api/v1/presets/{preset_id}", headers=admin_headers).status_code == 409
+
+
+def test_preset_migration_preserves_existing_user_policies(client, admin_headers):
+    from app.scripts.migrate import sync_canonical_schema
+
+    first = client.post("/api/v1/users", headers=admin_headers, json={"name": "first", "allowed_thinking_levels": ["low"]})
+    second = client.post("/api/v1/users", headers=admin_headers, json={"name": "second", "allowed_thinking_levels": ["max"]})
+    assert first.status_code == second.status_code == 201
+    sync_canonical_schema()
+    users = client.get("/api/v1/users", headers=admin_headers).json()["users"]
+    presets = client.get("/api/v1/presets", headers=admin_headers).json()["presets"]
+    assert len(presets) == 1 and presets[0]["name"] == "Current configuration"
+    assert {user["name"]: user["allowed_thinking_levels"] for user in users} == {"first": ["low"], "second": ["max"]}
+    assert all(user["preset_id"] == presets[0]["id"] for user in users)
+    assert sum("allowed_thinking_levels" in user["preset_overrides"] for user in users) == 1
+
+
+def test_per_model_thinking_mode_from_preset_is_enforced(client, admin_headers):
+    preset = client.post(
+        "/api/v1/presets",
+        headers=admin_headers,
+        json={"name": "Enabled only", "model_thinking_modes": {"claude-sonnet-4-6": ["enabled"]}},
+    ).json()
+    user = client.post("/api/v1/users", headers=admin_headers, json={"name": "mode-user", "preset_id": preset["id"]}).json()["user"]
+    secret = client.post(f"/api/v1/users/{user['id']}/keys", headers=admin_headers, json={"label": "test"}).json()["secret"]
+    response = client.post(
+        "/api/v1/messages",
+        headers={"x-api-key": secret},
+        json={"model": "claude-sonnet-4-6", "max_tokens": 8, "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.status_code == 403
+    assert "not allowed for model" in response.text
+
+
+def test_preset_routes_use_user_policy_permissions():
+    from app.utils.security.permissions import required_permission
+
+    assert required_permission("/api/v1/presets", "GET") == "proxy_users:read"
+    assert required_permission("/api/v1/presets", "POST") == "proxy_users:write"
+    assert required_permission("/api/v1/users/123/preset-overrides/allowed_models", "DELETE") == "proxy_users:write"
+
+
 def test_login_success_and_failure(client, admin_password):
     ok = client.post("/api/v1/auth/login", json={"username": "admin", "password": admin_password})
     assert ok.status_code == 200
@@ -205,7 +286,7 @@ def test_proxy_streaming_relays_and_records(client, admin_headers, seed_account,
         "/api/v1/messages",
         headers={"Authorization": f"Bearer {key}"},
         json={
-            "model": "x",
+            "model": "claude-opus-4-8",
             "stream": True,
             "thinking": {"type": "adaptive"},
             "output_config": {"effort": "high"},
@@ -213,7 +294,7 @@ def test_proxy_streaming_relays_and_records(client, admin_headers, seed_account,
     )
     assert resp.status_code == 200
     assert "message_delta" in resp.text
-    assert '"model":"x"' in resp.text
+    assert '"model":"claude-opus-4-8"' in resp.text
     assert '"model":"claude-sonnet-4-6"' not in resp.text
 
     record = client.get("/api/v1/stats/usage", headers=admin_headers).json()["items"][0]
@@ -602,6 +683,37 @@ def test_user_extended_limits_and_model_overrides_crud(client, admin_headers):
     )
 
 
+def test_unknown_models_cannot_be_saved_to_claude_user_policy(client, admin_headers):
+    for payload in (
+        {"name": "unknown-source", "model_overrides": {"claude-imaginary": "claude-sonnet-5"}},
+        {"name": "unknown-target", "model_overrides": {"claude-opus-4-8": "claude-imaginary"}},
+    ):
+        assert client.post("/api/v1/users", headers=admin_headers, json=payload).status_code == 422
+    created = client.post("/api/v1/users", headers=admin_headers, json={"name": "valid-user"}).json()["user"]
+    assert (
+        client.put(
+            f"/api/v1/users/{created['id']}",
+            headers=admin_headers,
+            json={"model_overrides": {"claude-opus-4-8": "claude-imaginary"}},
+        ).status_code
+        == 422
+    )
+    users = client.get("/api/v1/users", headers=admin_headers).json()["users"]
+    assert len(users) == 1 and users[0]["model_overrides"] == {}
+
+
+@respx.mock
+def test_unknown_model_never_reaches_claude_upstream(client, make_user):
+    key = make_user("unknown-model-user")
+    respx.route(host="testserver").pass_through()
+    upstream = respx.post(ANTHROPIC_MESSAGES).mock(return_value=httpx.Response(200, json={}))
+    headers = {"Authorization": f"Bearer {key}"}
+    for path in ("/api/v1/messages", "/api/v1/messages/count_tokens"):
+        response = client.post(path, headers=headers, json={"model": "claude-imaginary", "messages": []})
+        assert response.status_code == 400, (path, response.text)
+    assert upstream.call_count == 0
+
+
 @respx.mock
 def test_user_model_override_rewrites_upstream_request(client, admin_headers, seed_account):
     seed_account("override-account")
@@ -701,7 +813,7 @@ def test_per_user_allowed_thinking_levels(client, admin_headers, seed_account):
     allowed = client.post(
         "/api/v1/messages",
         headers=auth,
-        json={"model": "x", "output_config": {"effort": "medium"}},
+        json={"model": "claude-sonnet-4-6", "output_config": {"effort": "medium"}},
     )
     assert allowed.status_code == 200
     assert upstream.call_count == 1
@@ -709,13 +821,13 @@ def test_per_user_allowed_thinking_levels(client, admin_headers, seed_account):
     blocked = client.post(
         "/api/v1/messages",
         headers=auth,
-        json={"model": "x", "output_config": {"effort": "high"}},
+        json={"model": "claude-sonnet-4-6", "output_config": {"effort": "high"}},
     )
     assert blocked.status_code == 403
     assert "not allowed" in blocked.json()["detail"]
     assert upstream.call_count == 1
 
-    implicit = client.post("/api/v1/messages", headers=auth, json={"model": "x"})
+    implicit = client.post("/api/v1/messages", headers=auth, json={"model": "claude-sonnet-4-6"})
     assert implicit.status_code == 200
     assert upstream.call_count == 2
 
