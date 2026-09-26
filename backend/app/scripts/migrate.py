@@ -57,6 +57,11 @@ def sync_canonical_schema() -> None:
     """Apply additive fields introduced after the migration history was squashed."""
     with engine.begin() as connection:
         inspector = inspect(connection)
+        if inspector.has_table("users"):
+            user_columns = {column["name"] for column in inspector.get_columns("users")}
+            for column_name in ("rate_limit_per_hour", "rate_limit_per_day"):
+                if column_name not in user_columns:
+                    connection.execute(text(f"ALTER TABLE users ADD COLUMN {column_name} INTEGER"))
         if not inspector.has_table("accounts"):
             return
         account_columns = {column["name"] for column in inspector.get_columns("accounts")}
@@ -107,6 +112,7 @@ def sync_canonical_schema() -> None:
         )
 
         user_columns = {column["name"] for column in inspector.get_columns("users")}
+        needs_preset_backfill = "preset_id" not in user_columns or not inspector.has_table("presets")
         user_additions = {
             "priority": "INTEGER NOT NULL DEFAULT 1",
             "fallback_enabled": "BOOLEAN NOT NULL DEFAULT FALSE",
@@ -170,12 +176,15 @@ def sync_canonical_schema() -> None:
             baseline = (
                 connection.execute(text(f"SELECT {', '.join(preset_fields)} FROM presets WHERE id = :id"), {"id": existing_preset}).mappings().one()
             )
-        for row in connection.execute(text(f"SELECT id, {', '.join(preset_fields)} FROM users WHERE preset_id IS NULL")).mappings():
-            overrides = [field.removesuffix("_json") for field in preset_fields if row[field] != baseline[field]]
-            connection.execute(
-                text("UPDATE users SET preset_id = :preset_id, preset_overrides_json = :overrides WHERE id = :id"),
-                {"preset_id": existing_preset, "overrides": json.dumps(overrides), "id": row["id"]},
-            )
+        # Only backfill a legacy schema once. A NULL preset_id on an already-migrated
+        # schema is an intentional direct user policy and must survive restarts.
+        if needs_preset_backfill:
+            for row in connection.execute(text(f"SELECT id, {', '.join(preset_fields)} FROM users WHERE preset_id IS NULL")).mappings():
+                overrides = [field.removesuffix("_json") for field in preset_fields if row[field] != baseline[field]]
+                connection.execute(
+                    text("UPDATE users SET preset_id = :preset_id, preset_overrides_json = :overrides WHERE id = :id"),
+                    {"preset_id": existing_preset, "overrides": json.dumps(overrides), "id": row["id"]},
+                )
 
         # Reconcile fallback routing additions without inventing a second
         # migration history.
