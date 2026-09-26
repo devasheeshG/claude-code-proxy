@@ -170,14 +170,15 @@ other settings.
 
 The Users page manages reusable policy presets. A preset defines allowed
 models, global thinking levels and modes, exact model rewrites, and optional
-per-model thinking levels/modes. Assign one preset to each user; editing it
-updates inherited fields across its users. A user can override individual
-fields and reset them to the preset. New and upgraded installations create a
+per-model thinking levels/modes. A user may select a preset or **No preset**.
+With a preset, edits to individual policy fields—including allowed models and
+model rewrites—are explicit overrides; other fields stay inherited. With no
+preset, the entire policy is edited directly. Switching to No preset preserves
+the current effective policy across restarts. Upgraded installations create a
 **Current configuration** preset and assign existing users without changing
-their effective policies.
-The Edit User dialog places preset selection after usage budgets. Preset-owned
-model access and rewrites are managed in the preset; user-specific thinking
-and mode overrides appear only when explicitly enabled.
+their effective policies. User-wide request limits can be set independently
+per minute, rolling hour, and rolling 24 hours; they apply across all of the
+user's API keys. Zero or blank disables a limit.
 
 Users use the same card language as accounts. Cards show priority, active state,
 request mode, thinking levels, allowed models, model rewrites, API-key count,
