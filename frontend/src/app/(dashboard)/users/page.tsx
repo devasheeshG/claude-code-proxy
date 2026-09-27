@@ -105,32 +105,6 @@ function UserRateLimitFields({
     );
 }
 
-function UserLimitBadges({ user }: { user: User }) {
-    const limits = [
-        user.rate_limit_per_minute ? `${formatNumber(user.rate_limit_per_minute)}/min` : null,
-        user.rate_limit_per_hour ? `${formatNumber(user.rate_limit_per_hour)}/hour` : null,
-        user.rate_limit_per_day ? `${formatNumber(user.rate_limit_per_day)}/day` : null,
-        user.monthly_token_budget ? `${formatTokens(user.monthly_token_budget)} tok/mo` : null,
-        user.lifetime_token_budget
-            ? `${formatTokens(user.lifetime_token_budget)} tok lifetime`
-            : null,
-        user.monthly_spend_budget_usd ? `${formatUsd(user.monthly_spend_budget_usd)}/mo` : null,
-        user.lifetime_spend_budget_usd
-            ? `${formatUsd(user.lifetime_spend_budget_usd)} lifetime`
-            : null,
-    ].filter(Boolean);
-    if (limits.length === 0) return null;
-    return (
-        <span className="inline-flex flex-wrap gap-1.5">
-            {limits.map((limit) => (
-                <Badge key={limit} tone="neutral">
-                    {limit}
-                </Badge>
-            ))}
-        </span>
-    );
-}
-
 // Render the small "rate / budget" limit chips shared by users and keys.
 function LimitBadges({ rate, budget }: { rate: number | null; budget: number | null }) {
     if (!rate && !budget) return null;
@@ -238,7 +212,7 @@ function ThinkingLevelSelector({
                             key={level}
                             className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm capitalize transition-colors ${
                                 checked
-                                    ? "border-brand-400/40 bg-brand-500/10 text-brand-300"
+                                    ? "border-ink-700 bg-ink-900/60 text-fog-200"
                                     : "border-ink-700 bg-ink-900/50 text-fog-400"
                             }`}
                         >
@@ -254,6 +228,35 @@ function ThinkingLevelSelector({
                 })}
             </div>
         </Field>
+    );
+}
+
+const PRESET_OVERRIDE_LABELS: Record<string, string> = {
+    allowed_models: "Models overridden",
+    allowed_thinking_levels: "Thinking levels overridden",
+    allowed_thinking_modes: "Thinking modes overridden",
+    model_overrides: "Model rewrites overridden",
+    model_thinking_levels: "Per-model thinking overridden",
+    model_thinking_modes: "Per-model modes overridden",
+};
+
+function PolicyBadges({ user, presetName }: { user: User; presetName?: string }) {
+    const overrideLabels = user.preset_id
+        ? user.preset_overrides.map(
+              (field) => PRESET_OVERRIDE_LABELS[field] ?? `${field} overridden`,
+          )
+        : [];
+    return (
+        <span className="inline-flex flex-wrap gap-1.5">
+            <Badge tone={user.preset_id ? "brand" : "neutral"}>
+                {user.preset_id ? `Preset: ${presetName ?? "Applied"}` : "No preset"}
+            </Badge>
+            {overrideLabels.map((label) => (
+                <Badge key={label} tone="neutral">
+                    {label}
+                </Badge>
+            ))}
+        </span>
     );
 }
 
@@ -696,42 +699,16 @@ export default function UsersPage() {
                                                                             <span className="text-fog-100 text-[15px] font-semibold tracking-tight">
                                                                                 {user.name}
                                                                             </span>
-                                                                            <Badge tone="neutral">
-                                                                                Priority{" "}
-                                                                                {user.priority ?? 4}
-                                                                            </Badge>
-                                                                            <UserLimitBadges
+                                                                            <PolicyBadges
                                                                                 user={user}
+                                                                                presetName={
+                                                                                    presets.find(
+                                                                                        (preset) =>
+                                                                                            preset.id ===
+                                                                                            user.preset_id,
+                                                                                    )?.name
+                                                                                }
                                                                             />
-                                                                            <Badge tone="brand">
-                                                                                Thinking:{" "}
-                                                                                {user
-                                                                                    .allowed_thinking_levels
-                                                                                    .length ===
-                                                                                THINKING_LEVELS.length
-                                                                                    ? "all"
-                                                                                    : user.allowed_thinking_levels.join(
-                                                                                          ", ",
-                                                                                      ) ||
-                                                                                      "implicit only"}
-                                                                            </Badge>
-                                                                            {Object.keys(
-                                                                                user.model_overrides,
-                                                                            ).length > 0 ? (
-                                                                                <Badge tone="neutral">
-                                                                                    {
-                                                                                        Object.keys(
-                                                                                            user.model_overrides,
-                                                                                        ).length
-                                                                                    }{" "}
-                                                                                    model rewrite
-                                                                                    {Object.keys(
-                                                                                        user.model_overrides,
-                                                                                    ).length === 1
-                                                                                        ? ""
-                                                                                        : "s"}
-                                                                                </Badge>
-                                                                            ) : null}
                                                                         </div>
                                                                         <div className="text-fog-400 mt-0.5 text-xs">
                                                                             Added{" "}
