@@ -1065,14 +1065,12 @@ def test_events_and_model_mix_keep_routed_model_when_provider_reports_alias(
 
     model_mix = client.get("/api/v1/stats/model-mix", headers=admin_headers)
     assert model_mix.status_code == 200, model_mix.text
-    assert model_mix.json()["users"][0]["models"] == [
-        {
-            "model": "claude-sonnet-4-5",
-            "requests": 1,
-            "input_tokens": 10,
-            "output_tokens": 2,
-        }
-    ]
+    model_row = model_mix.json()["users"][0]["models"][0]
+    assert model_row["model"] == "claude-sonnet-4-5"
+    assert model_row["requests"] == 1
+    assert model_row["input_tokens"] == 10
+    assert model_row["output_tokens"] == 2
+    assert model_row["average_tps"] > 0
 
 
 def test_overview_aggregates_active_pool_capacity(client, admin_headers, seed_account):

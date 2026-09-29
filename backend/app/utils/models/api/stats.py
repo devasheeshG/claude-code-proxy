@@ -239,6 +239,7 @@ class ModelSlice(BaseModel):
     requests: int
     input_tokens: int
     output_tokens: int
+    average_tps: Optional[float] = None
 
 
 class UserModelMix(BaseModel):
