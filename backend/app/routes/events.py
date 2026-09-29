@@ -90,6 +90,8 @@ def list_events(
                 "cached_input_tokens": usage_row.cache_read_input_tokens,
                 "cache_write_tokens": usage_row.cache_creation_input_tokens,
                 "cost_usd": usage_row.billed_cost_usd,
+                "duration_ms": usage_row.duration_ms,
+                "tokens_per_second": usage_row.tokens_per_second,
                 "reasoning_level": usage_row.reasoning_level,
             }
         if row.account_id:

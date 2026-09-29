@@ -304,6 +304,8 @@ class UsageRecordDb(DatabaseBase):
     status_code = Column(Integer, nullable=True)
     request_id = Column(VARCHAR, nullable=True)
     billed_cost_usd = Column(Float, nullable=True)
+    duration_ms = Column(Float, nullable=True)
+    tokens_per_second = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (

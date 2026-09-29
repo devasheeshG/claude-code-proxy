@@ -55,6 +55,8 @@ class UsageRecord(BaseModel):
     cache_read_input_tokens: int
     cache_creation_5m_input_tokens: int
     cache_creation_1h_input_tokens: int
+    duration_ms: Optional[float] = None
+    tokens_per_second: Optional[float] = None
     cache_ttl: Optional[str]  # "1h" / "5m" / None -- the prompt-cache TTL this request wrote to, for display.
     reasoning_level: Optional[str]
     cost_usd: float  # API-equivalent cost of this request (what it would cost on the pay-as-you-go API).
@@ -96,6 +98,8 @@ class UsageRecord(BaseModel):
             cache_read_input_tokens=record_db.cache_read_input_tokens,
             cache_creation_5m_input_tokens=record_db.cache_creation_5m_input_tokens,
             cache_creation_1h_input_tokens=record_db.cache_creation_1h_input_tokens,
+            duration_ms=getattr(record_db, "duration_ms", None),
+            tokens_per_second=getattr(record_db, "tokens_per_second", None),
             cache_ttl=cache_ttl,
             reasoning_level=record_db.reasoning_level,
             cost_usd=(float(record_db.billed_cost_usd) if record_db.billed_cost_usd is not None else pricing.cost_for_record(record_db)),
@@ -167,6 +171,7 @@ class OverviewResponse(BaseModel):
     # API-equivalent value of the range's usage (what it would cost on the pay-as-you-go API). ROI signal, not owed.
     api_equivalent_cost_usd: float
     requests: int
+    average_tps: Optional[float] = None
 
 
 # GET /stats/activity

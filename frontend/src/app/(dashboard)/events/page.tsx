@@ -369,6 +369,7 @@ export default function EventsPage() {
                                         "Event",
                                         "Input",
                                         "Output",
+                                        "TPS",
                                         "Cache read",
                                         "Cache write",
                                         "Cost",
@@ -441,6 +442,9 @@ export default function EventsPage() {
                                             </td>
                                             <td className="w-24 min-w-24 px-3 py-3 font-mono text-xs whitespace-nowrap">
                                                 {formatCompactNumber(m.output_tokens)}
+                                            </td>
+                                            <td className="text-fog-300 w-24 min-w-24 px-3 py-3 font-mono text-xs whitespace-nowrap">
+                                                {m.tokens_per_second == null ? "—" : `${Number(m.tokens_per_second).toFixed(1)} t/s`}
                                             </td>
                                             <td className="w-32 min-w-32 px-3 py-3 font-mono text-xs">
                                                 <CacheReadMetric

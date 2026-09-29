@@ -6,6 +6,7 @@
 import asyncio
 import json
 import re
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from math import ceil
@@ -542,6 +543,7 @@ def _record_usage_safe(
     status_code: Optional[int],
     request_id: Optional[str],
     fallback_provider_id: Optional[uuid.UUID] = None,
+    duration_ms: Optional[float] = None,
 ) -> None:
     """Record usage in its own short-lived session; usage accounting must never break the proxied response."""
     try:
@@ -555,6 +557,7 @@ def _record_usage_safe(
                 status_code,
                 request_id,
                 fallback_provider_id,
+                duration_ms,
             )
     except Exception:  # noqa: BLE001
         logger.exception("Failed to record proxied token usage")
@@ -565,6 +568,13 @@ def _set_archive_metadata(request: Request, **fields: object) -> None:
     metadata = getattr(request.state, "archive_metadata", None)
     if isinstance(metadata, dict):
         metadata.update({key: value for key, value in fields.items() if value is not None})
+
+
+def _request_duration_ms(request: Request) -> Optional[float]:
+    started = getattr(request.state, "proxy_started_at", None)
+    if not isinstance(started, (int, float)):
+        return None
+    return round(max(0.0, (time.perf_counter() - started) * 1000.0), 3)
 
 
 def _archive_usage(request: Request, usage_obj: usage.Usage) -> None:
@@ -620,6 +630,7 @@ async def proxy_messages(
 ):
     """Forward a Messages API call through a rotated subscription account, streaming the SSE response back."""
     request.state.proxy_event_request_id = request_context.get_request_context().get("request_id") or f"req_{uuid.uuid4().hex}"
+    request.state.proxy_started_at = time.perf_counter()
     body = await request.body()
     is_count_tokens = request.url.path.rstrip("/").endswith("/count_tokens")
     request_reasoning = None
@@ -1228,6 +1239,7 @@ async def proxy_messages(
                 resp.status_code,
                 request_id,
                 chosen_fallback_id,
+                _request_duration_ms(request),
             )
 
         raw = _restore_requested_model_in_success_json(raw, resp.status_code, requested_model)
@@ -1261,6 +1273,7 @@ async def proxy_messages(
                 status_code,
                 request_id,
                 chosen_fallback_id,
+                _request_duration_ms(request),
             )
 
     return StreamingResponse(

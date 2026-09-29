@@ -60,6 +60,7 @@ export interface OverviewStats {
     // billed spend for API fallback traffic.
     api_equivalent_cost_usd: number;
     requests: number;
+    average_tps: number | null;
 }
 
 // Usage ----------------------------------------------------------------------
@@ -82,6 +83,8 @@ export interface UsageRecord {
     // Cache-creation split by TTL bucket.
     cache_creation_5m_input_tokens: number;
     cache_creation_1h_input_tokens: number;
+    duration_ms?: number | null;
+    tokens_per_second?: number | null;
     // Which cache TTL this request used, if any.
     cache_ttl: "1h" | "5m" | null;
     // Thinking effort requested for this individual message.

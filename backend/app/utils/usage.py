@@ -143,6 +143,7 @@ def record_usage(
     status_code: Optional[int],
     request_id: Optional[str],
     fallback_provider_id: Optional[uuid.UUID] = None,
+    duration_ms: Optional[float] = None,
 ) -> None:
     """Persist a single usage record and bump the user's and key's last-used time."""
     now = datetime.now(timezone.utc)
@@ -173,6 +174,8 @@ def record_usage(
             cache_creation_1h_input_tokens=usage.cache_creation_1h_input_tokens,
             cache_creation_input_tokens=usage.cache_creation_input_tokens,
         ),
+        duration_ms=duration_ms,
+        tokens_per_second=(usage.output_tokens / (duration_ms / 1000.0) if duration_ms and duration_ms > 0 and usage.output_tokens > 0 else None),
         created_at=now,
     )
     db.add(record)
