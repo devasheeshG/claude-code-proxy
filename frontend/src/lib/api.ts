@@ -523,6 +523,7 @@ export const api = {
             allowed_thinking_modes?: ThinkingMode[];
             model_thinking_levels?: Record<string, ThinkingLevel[]>;
             model_thinking_modes?: Record<string, ThinkingMode[]>;
+            allow_extended_context?: boolean;
         } = {},
     ): Promise<User> {
         const res = await request<{ user: User }>("/v1/users", {
@@ -545,6 +546,7 @@ export const api = {
                 allowed_thinking_modes: opts.allowed_thinking_modes,
                 model_thinking_levels: opts.model_thinking_levels,
                 model_thinking_modes: opts.model_thinking_modes,
+                allow_extended_context: opts.allow_extended_context,
             },
         });
         return res.user;
@@ -571,6 +573,7 @@ export const api = {
             allowed_thinking_modes?: ThinkingMode[];
             model_thinking_levels?: Record<string, ThinkingLevel[]>;
             model_thinking_modes?: Record<string, ThinkingMode[]>;
+            allow_extended_context?: boolean;
         },
     ): Promise<User> {
         const res = await request<{ user: User }>(`/v1/users/${id}`, {

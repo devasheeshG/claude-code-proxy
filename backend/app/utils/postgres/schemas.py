@@ -142,6 +142,8 @@ class UserDb(DatabaseBase):
         Text, nullable=False, default='["disabled","enabled","adaptive"]', server_default='["disabled","enabled","adaptive"]'
     )
     model_thinking_modes_json = Column(Text, nullable=False, default="{}", server_default="{}")
+    # Shared policy flag; Claude requests may use the provider's extended-context beta when enabled.
+    allow_extended_context = Column(Boolean, nullable=False, default=False, server_default="false")
     created_at = Column(DateTime(timezone=True), nullable=False)
     last_used_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -165,6 +167,7 @@ class PresetDb(DatabaseBase):
     model_thinking_levels_json = Column(Text, nullable=False, server_default="{}")
     allowed_thinking_modes_json = Column(Text, nullable=False, server_default='["disabled","enabled","adaptive"]')
     model_thinking_modes_json = Column(Text, nullable=False, server_default="{}")
+    allow_extended_context = Column(Boolean, nullable=False, server_default="false")
     created_at = Column(DateTime(timezone=True), nullable=False)
 
 

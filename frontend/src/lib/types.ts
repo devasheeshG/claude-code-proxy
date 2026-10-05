@@ -351,6 +351,7 @@ export interface Preset {
     model_overrides: Record<string, string>;
     model_thinking_levels: Record<string, ThinkingLevel[]>;
     model_thinking_modes: Record<string, ThinkingMode[]>;
+    allow_extended_context: boolean;
 }
 
 export interface User {
@@ -376,6 +377,7 @@ export interface User {
     allowed_thinking_modes: ThinkingMode[];
     model_thinking_levels: Record<string, ThinkingLevel[]>;
     model_thinking_modes: Record<string, ThinkingMode[]>;
+    allow_extended_context: boolean;
     preset_id: string | null;
     preset_overrides: string[];
     last_used_at: string | null;

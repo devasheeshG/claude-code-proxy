@@ -238,6 +238,7 @@ const PRESET_OVERRIDE_LABELS: Record<string, string> = {
     model_overrides: "Model rewrites overridden",
     model_thinking_levels: "Per-model thinking overridden",
     model_thinking_modes: "Per-model modes overridden",
+    allow_extended_context: "Extended context overridden",
 };
 
 function PolicyBadges({ user, presetName }: { user: User; presetName?: string }) {
@@ -275,6 +276,8 @@ function UserPolicyFields({
     onModelLevels,
     modelModes,
     onModelModes,
+    allowExtendedContext,
+    onAllowExtendedContext,
 }: {
     modelOptions: string[];
     visible?: string[];
@@ -290,10 +293,18 @@ function UserPolicyFields({
     onModelLevels: (value: Record<string, ThinkingLevel[]>) => void;
     modelModes: Record<string, ThinkingMode[]>;
     onModelModes: (value: Record<string, ThinkingMode[]>) => void;
+    allowExtendedContext: boolean;
+    onAllowExtendedContext: (value: boolean) => void;
 }) {
     const show = (field: string) => !visible || visible.includes(field);
     return (
         <div className="space-y-5">
+            {show("allow_extended_context") && (
+                <label className="border-ink-700 bg-ink-900/50 text-fog-200 flex items-start gap-2.5 rounded-md border px-3 py-2.5 text-sm">
+                    <input type="checkbox" checked={allowExtendedContext} onChange={(e) => onAllowExtendedContext(e.target.checked)} className="accent-brand-500 mt-0.5 h-4 w-4 shrink-0" />
+                    <span><span className="block">Allow extended context window</span><span className="text-fog-400 mt-0.5 block text-xs">Enable the provider&apos;s extended context mode for this policy.</span></span>
+                </label>
+            )}
             {show("allowed_models") && (
                 <div className="space-y-2">
                     <div className="text-fog-300 text-xs font-medium">Allowed models</div>
@@ -1329,6 +1340,7 @@ function CreateUserModal({
     const [modelModes, setModelModes] = useState<Record<string, ThinkingMode[]>>(
         presets[0]?.model_thinking_modes ?? {},
     );
+    const [allowExtendedContext, setAllowExtendedContext] = useState(presets[0]?.allow_extended_context ?? false);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -1356,6 +1368,7 @@ function CreateUserModal({
                           allowed_thinking_modes: allowedModes,
                           model_thinking_levels: modelLevels,
                           model_thinking_modes: modelModes,
+                          allow_extended_context: allowExtendedContext,
                       }
                     : {}),
             });
@@ -1417,6 +1430,7 @@ function CreateUserModal({
                                 setAllowedModes(preset.allowed_thinking_modes);
                                 setModelLevels(preset.model_thinking_levels);
                                 setModelModes(preset.model_thinking_modes);
+                                setAllowExtendedContext(preset.allow_extended_context);
                             }
                         }}
                         options={[
@@ -1441,6 +1455,8 @@ function CreateUserModal({
                         onModelLevels={setModelLevels}
                         modelModes={modelModes}
                         onModelModes={setModelModes}
+                        allowExtendedContext={allowExtendedContext}
+                        onAllowExtendedContext={setAllowExtendedContext}
                     />
                 )}
 
@@ -1598,6 +1614,7 @@ function EditUserModal({
     const [modelModes, setModelModes] = useState<Record<string, ThinkingMode[]>>(
         user.model_thinking_modes,
     );
+    const [allowExtendedContext, setAllowExtendedContext] = useState(user.allow_extended_context);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -1641,6 +1658,9 @@ function EditUserModal({
                     : {}),
                 ...(shouldUseOverride("model_thinking_modes")
                     ? { model_thinking_modes: modelModes }
+                    : {}),
+                ...(shouldUseOverride("allow_extended_context")
+                    ? { allow_extended_context: allowExtendedContext }
                     : {}),
             });
             onSaved(updated);
@@ -1767,6 +1787,7 @@ function EditUserModal({
                                 setAllowedModes(preset.allowed_thinking_modes);
                                 setModelLevels(preset.model_thinking_levels);
                                 setModelModes(preset.model_thinking_modes);
+                                setAllowExtendedContext(preset.allow_extended_context);
                             }
                         }}
                         options={[
@@ -1789,6 +1810,7 @@ function EditUserModal({
                                 ["model_overrides", "Model rewrites"],
                                 ["model_thinking_levels", "Per-model thinking levels"],
                                 ["model_thinking_modes", "Per-model thinking modes"],
+                                ["allow_extended_context", "Extended context window"],
                             ] as const
                         ).map(([field, label]) => (
                             <label
@@ -1823,6 +1845,8 @@ function EditUserModal({
                         onModelLevels={setModelLevels}
                         modelModes={modelModes}
                         onModelModes={setModelModes}
+                        allowExtendedContext={allowExtendedContext}
+                        onAllowExtendedContext={setAllowExtendedContext}
                     />
                 )}
 
