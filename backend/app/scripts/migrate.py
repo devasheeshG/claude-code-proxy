@@ -194,6 +194,20 @@ def sync_canonical_schema() -> None:
                 )
         connection.execute(text("UPDATE users SET allow_extended_context = TRUE WHERE lower(trim(name)) = 'devasheesh'"))
 
+        # Repair the protected user's existing override marker without
+        # changing other policy choices. Repeat migrations are idempotent.
+        for row in (
+            connection.execute(text("SELECT id, preset_overrides_json FROM users WHERE lower(trim(name)) = 'devasheesh' AND preset_id IS NOT NULL"))
+            .mappings()
+            .all()
+        ):
+            overrides = set(json.loads(row["preset_overrides_json"] or "[]"))
+            overrides.add("allow_extended_context")
+            connection.execute(
+                text("UPDATE users SET preset_overrides_json = :overrides WHERE id = :id"),
+                {"overrides": json.dumps(sorted(overrides)), "id": row["id"]},
+            )
+
         # Reconcile fallback routing additions without inventing a second
         # migration history.
         AnthropicFallbackDb.__table__.create(connection, checkfirst=True)
