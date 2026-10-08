@@ -57,11 +57,9 @@ def test_new_account_gets_default_rotation_policy(seed_account):
         assert acct.max_failover_attempts == config.DEFAULT_MAX_FAILOVER_ATTEMPTS
 
 
-def test_force_refresh_does_not_require_a_synthetic_expiry(seed_account, monkeypatch):
+def test_rejected_token_refreshes_without_a_synthetic_expiry(seed_account, monkeypatch):
     """A provider 401 must refresh the current row without clobbering its expiry."""
     from app.utils import oauth
-    from app.utils.postgres import AccountDb
-    from app.utils.postgres.base import SessionFactory
 
     account_id = seed_account("force-refresh", expires_in_hours=1)
     refreshed_expiry = datetime.now(timezone.utc) + timedelta(hours=2)
@@ -73,7 +71,7 @@ def test_force_refresh_does_not_require_a_synthetic_expiry(seed_account, monkeyp
 
     with SessionFactory() as db:
         account = db.get(AccountDb, account_id)
-        assert rotation.ensure_fresh_token(db, account, force_refresh=True) == "rotated-access"
+        assert rotation.ensure_fresh_token(db, account, rejected_token="upstream-access-token") == "rotated-access"
         persisted = db.get(AccountDb, account_id)
         assert persisted.expires_at == refreshed_expiry
 
@@ -102,6 +100,22 @@ def test_expiring_token_reuses_a_concurrent_rotation(seed_account, monkeypatch):
         assert account.expires_at is not None  # loaded before the other worker rotates
         _rotate_in_other_session(account_id, "other-access", "other-refresh", datetime.now(timezone.utc) + timedelta(hours=8))
         assert rotation.ensure_fresh_token(db, account) == "other-access"
+    assert calls == []
+
+
+def test_rejected_token_reuses_a_concurrent_rotation(seed_account, monkeypatch):
+    """Concurrent 401s on one token trigger one refresh; later callers get the replacement."""
+    from app.utils import oauth
+
+    account_id = seed_account("concurrent-401", expires_in_hours=1)
+    calls = []
+    monkeypatch.setattr(oauth, "refresh_access_token", lambda refresh: calls.append(refresh))
+
+    with SessionFactory() as db:
+        account = db.get(AccountDb, account_id)
+        assert account.expires_at is not None
+        _rotate_in_other_session(account_id, "other-access", "other-refresh", datetime.now(timezone.utc) + timedelta(hours=8))
+        assert rotation.ensure_fresh_token(db, account, rejected_token="upstream-access-token") == "other-access"
     assert calls == []
 
 
