@@ -443,3 +443,5 @@ this proxy never invents or automatically claims a reset. Requests retain
 normal failover and bounded pool waiting; provider quotas recover through
 natural resets. The paired Codex proxy uses reset credits only as a last
 resort after model-compatible account capacity is exhausted.
+
+Presets include **Allow API fallback providers**. Users inherit this setting unless they select a per-user fallback override. Clearing the override restores preset inheritance. The migration preserves existing user fallback permissions.
