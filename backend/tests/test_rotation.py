@@ -78,6 +78,54 @@ def test_force_refresh_does_not_require_a_synthetic_expiry(seed_account, monkeyp
         assert persisted.expires_at == refreshed_expiry
 
 
+def _rotate_in_other_session(account_id, access_token: str, refresh_token: str, expires_at: datetime) -> None:
+    from app.utils import crypto
+
+    with SessionFactory() as other:
+        row = other.get(AccountDb, account_id)
+        row.access_token_enc = crypto.encrypt(access_token)
+        row.refresh_token_enc = crypto.encrypt(refresh_token)
+        row.expires_at = expires_at
+        other.commit()
+
+
+def test_expiring_token_reuses_a_concurrent_rotation(seed_account, monkeypatch):
+    """A worker holding a stale row must not spend a refresh token another worker already rotated."""
+    from app.utils import oauth
+
+    account_id = seed_account("concurrent-expiry", expires_in_hours=0)
+    calls = []
+    monkeypatch.setattr(oauth, "refresh_access_token", lambda refresh: calls.append(refresh))
+
+    with SessionFactory() as db:
+        account = db.get(AccountDb, account_id)
+        assert account.expires_at is not None  # loaded before the other worker rotates
+        _rotate_in_other_session(account_id, "other-access", "other-refresh", datetime.now(timezone.utc) + timedelta(hours=8))
+        assert rotation.ensure_fresh_token(db, account) == "other-access"
+    assert calls == []
+
+
+def test_refresh_spends_the_latest_refresh_token(seed_account, monkeypatch):
+    from app.utils import oauth
+
+    account_id = seed_account("latest-refresh", expires_in_hours=0)
+    spent = []
+
+    def refresh(refresh_token):
+        spent.append(refresh_token)
+        return {"access_token": "new-access", "refresh_token": "new-refresh", "expires_at": datetime.now(timezone.utc) + timedelta(hours=8)}
+
+    monkeypatch.setattr(oauth, "refresh_access_token", refresh)
+
+    with SessionFactory() as db:
+        account = db.get(AccountDb, account_id)
+        assert account.expires_at is not None
+        # Another worker rotated, but its new access token is already near expiry, so this worker must refresh again.
+        _rotate_in_other_session(account_id, "other-access", "other-refresh", datetime.now(timezone.utc))
+        assert rotation.ensure_fresh_token(db, account) == "new-access"
+    assert spent == ["other-refresh"]
+
+
 def test_is_available_uses_per_account_threshold(seed_account):
     # The same 0.50 utilization is benched under a 0.40 per-account threshold but available under the default 1.0.
     strict = seed_account("strict", session_used_pct=0.50, rotation_threshold=0.40)

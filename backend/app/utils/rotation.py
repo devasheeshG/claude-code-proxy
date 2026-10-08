@@ -188,7 +188,9 @@ def ensure_fresh_token(
     access token before its JWT expiry, so callers must be able to refresh it
     without writing a synthetic expiry into the account row.  Keeping that
     decision inside the row lock prevents a stale request from clobbering a
-    concurrently rotated token/expiry.
+    concurrently rotated token/expiry. The row is re-read from the database
+    under the lock, so a refresh always spends the latest refresh token rather
+    than one another worker has already rotated.
     """
     if account.provider_health == ProviderHealth.REAUTH_REQUIRED:
         raise provider_health.reauthentication_error()
@@ -201,7 +203,11 @@ def ensure_fresh_token(
     if not force_refresh and expires_at - leeway > now:
         return _stored_access_token(db, account)
 
-    locked = db.query(AccountDb).filter(AccountDb.id == account.id).with_for_update().one()
+    # populate_existing() discards unflushed changes on the identity-mapped row, so flush them first.
+    db.flush()
+    locked = db.query(AccountDb).filter(AccountDb.id == account.id).with_for_update().populate_existing().one()
+    if locked.provider_health == ProviderHealth.REAUTH_REQUIRED:
+        raise provider_health.reauthentication_error()
     locked_expiry = locked.expires_at
     if locked_expiry.tzinfo is None:
         locked_expiry = locked_expiry.replace(tzinfo=timezone.utc)
