@@ -38,3 +38,11 @@ def test_dashboard_generated_commands_do_not_interpolate_revealed_secret():
     assert "${secret}" not in commands
     assert "CC_PROXY_KEY" not in commands
     assert "input hidden" in users_page
+
+
+def test_served_statusline_is_the_repository_copy(client):
+    response = client.get("/api/v1/clients/claude-code-statusline.sh")
+
+    assert response.status_code == 200
+    assert response.text == (REPOSITORY_ROOT / "backend/clients/claude-code-statusline.sh").read_text()
+    assert 'usage_tmp="${usage_cache}.tmp.$$"' in response.text
