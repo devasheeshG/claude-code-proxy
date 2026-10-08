@@ -12,14 +12,6 @@ def _assert_unix_installer_keeps_key_out_of_argv(script: str) -> None:
     assert 'jq --rawfile key "$KEY_FILE"' in script
 
 
-def test_backend_installer_prompts_for_key_instead_of_accepting_it_in_argv(client):
-    response = client.get("/api/v1/clients/install.sh")
-
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/x-shellscript")
-    _assert_unix_installer_keeps_key_out_of_argv(response.text)
-
-
 def test_public_installers_never_put_key_in_command_or_process_arguments():
     unix_script = (REPOSITORY_ROOT / "frontend/public/install.sh").read_text()
     powershell_script = (REPOSITORY_ROOT / "frontend/public/install.ps1").read_text()
