@@ -46,3 +46,4 @@ def test_served_statusline_is_the_repository_copy(client):
     assert response.status_code == 200
     assert response.text == (REPOSITORY_ROOT / "backend/clients/claude-code-statusline.sh").read_text()
     assert 'usage_tmp="${usage_cache}.tmp.$$"' in response.text
+    assert "umask 077" in response.text

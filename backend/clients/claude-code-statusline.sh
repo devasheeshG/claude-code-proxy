@@ -28,6 +28,8 @@ set -uo pipefail  # deliberately NOT -e: every segment degrades to empty rather 
 # Claude Code pipes a session JSON object on stdin. Capture it (may be empty when run by hand).
 stdin_json="$(cat 2>/dev/null || true)"
 
+# Cache files live in a shared temp dir and hold pool data fetched with this user's key; keep them private.
+umask 077
 cachedir="${TMPDIR:-/tmp}"
 now="$(date +%s)"
 
