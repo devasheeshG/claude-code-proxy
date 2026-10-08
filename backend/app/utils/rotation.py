@@ -167,6 +167,14 @@ def select_account(
     return chosen
 
 
+def _stored_access_token(db: Session, account: AccountDb) -> str:
+    try:
+        return crypto.decrypt(account.access_token_enc)
+    except Exception as exc:
+        provider_health.persist_failure(db, account.id, exc, context="credential_decrypt")
+        raise provider_health.reauthentication_error() from exc
+
+
 def ensure_fresh_token(
     db: Session,
     account: AccountDb,
@@ -191,22 +199,14 @@ def ensure_fresh_token(
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     if not force_refresh and expires_at - leeway > now:
-        try:
-            return crypto.decrypt(account.access_token_enc)
-        except Exception as exc:
-            provider_health.persist_failure(db, account.id, exc, context="credential_decrypt")
-            raise provider_health.reauthentication_error() from exc
+        return _stored_access_token(db, account)
 
     locked = db.query(AccountDb).filter(AccountDb.id == account.id).with_for_update().one()
     locked_expiry = locked.expires_at
     if locked_expiry.tzinfo is None:
         locked_expiry = locked_expiry.replace(tzinfo=timezone.utc)
     if not force_refresh and locked_expiry - leeway > now:
-        try:
-            return crypto.decrypt(locked.access_token_enc)
-        except Exception as exc:
-            provider_health.persist_failure(db, account.id, exc, context="credential_decrypt")
-            raise provider_health.reauthentication_error() from exc
+        return _stored_access_token(db, locked)
 
     try:
         refresh_plain = crypto.decrypt(locked.refresh_token_enc)
