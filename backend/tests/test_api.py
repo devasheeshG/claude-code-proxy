@@ -491,6 +491,20 @@ def test_prefetch_retries_an_error_frame_before_anything_is_sent():
     assert prepared._proxy_pre_output_failure is True
 
 
+def test_midstream_error_frame_is_forwarded_not_replaced_with_a_stop():
+    import asyncio
+
+    from app.routes.proxy import _iter_sse_frames
+
+    delta = 'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"text":"partial"}}\n\n'
+    error = 'event: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n\n'
+
+    async def collect():
+        return [frame async for frame in _iter_sse_frames(_streaming_response(delta[:20], delta[20:] + error))]
+
+    assert asyncio.run(collect()) == [delta.encode(), error.encode()]
+
+
 @respx.mock
 def test_refresh_quota_reports_rate_limit_cleanly(client, admin_headers, seed_account, monkeypatch):
     # A persistently rate-limited probe must return a friendly, actionable message -- not a raw httpx 429 string.

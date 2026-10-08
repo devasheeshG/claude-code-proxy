@@ -397,52 +397,20 @@ def _first_error_frame(raw: bytes, *, complete: bool) -> Optional[str]:
     return None
 
 
-def _is_provider_error_frame(frame: bytes) -> bool:
-    """Suppress Anthropic error frames, including midstream failures."""
-    return _is_error_text(frame.decode(errors="replace").lower())
-
-
-_SYNTHETIC_MESSAGE_STOP = b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
-
-
-def _sanitize_sse_payload(raw: bytes) -> bytes:
-    """Remove provider failure frames and terminate a buffered stream cleanly."""
-    output = bytearray()
-    remaining = raw
-    while remaining:
-        match = re.search(rb"\r?\n\r?\n", remaining)
-        if match is None:
-            if not _is_provider_error_frame(remaining):
-                output.extend(remaining)
-            break
-        end = match.end()
-        frame = remaining[: match.start()]
-        if _is_provider_error_frame(frame):
-            output.extend(_SYNTHETIC_MESSAGE_STOP)
-            return bytes(output)
-        output.extend(remaining[:end])
-        remaining = remaining[end:]
-    return bytes(output)
-
-
-async def _iter_sanitized_sse(response: httpx.Response):
-    """Stream SSE frames without ever forwarding provider error events."""
+async def _iter_sse_frames(response: httpx.Response):
+    """Re-chunk an SSE stream into whole frames so each can be rewritten independently."""
     buffer = bytearray()
     async for chunk in response.aiter_bytes():
         buffer.extend(chunk)
         while True:
-            match = re.search(rb"\r?\n\r?\n", buffer)
+            match = _SSE_FRAME_SEPARATOR.search(buffer)
             if match is None:
                 break
             end = match.end()
-            frame = bytes(buffer[: match.start()])
-            separator = match.group(0)
+            frame = bytes(buffer[:end])
             del buffer[:end]
-            if _is_provider_error_frame(frame):
-                yield _SYNTHETIC_MESSAGE_STOP
-                return
-            yield bytes(frame) + separator
-    if buffer and not _is_provider_error_frame(bytes(buffer)):
+            yield frame
+    if buffer:
         yield bytes(buffer)
 
 
@@ -468,7 +436,9 @@ async def _prepare_candidate(candidate: httpx.Response):
     3. A safety bound is reached (64 KB or 90 s total prefetch time) without
        either signal -> treat this attempt as failed and rotate accounts.
 
-    Phrases inside model output never count as failures.
+    Phrases inside model output never count as failures.  Once streaming has
+    started, a provider error frame is forwarded to the client unchanged, so
+    the client sees the failure instead of a truncated response.
     """
     if candidate.status_code != 200:
         return candidate
@@ -1228,8 +1198,6 @@ async def proxy_messages(
     if resp.status_code >= 400 or "text/event-stream" not in content_type:
         raw = await resp.aread()
         await resp.aclose()
-        if "text/event-stream" in content_type or raw.lstrip().startswith((b"event:", b"data:")):
-            raw = _sanitize_sse_payload(raw)
         raw = _restore_requested_model_in_error(raw, resp.status_code, requested_model, request_model)
 
         if not is_count_tokens:
@@ -1269,7 +1237,7 @@ async def proxy_messages(
 
     async def stream_body():
         try:
-            async for chunk in _iter_sanitized_sse(resp):
+            async for chunk in _iter_sse_frames(resp):
                 accumulator.feed(chunk)
                 yield _restore_requested_model_in_sse_frame(chunk, requested_model)
         finally:
