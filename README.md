@@ -431,9 +431,6 @@ only Anthropic hosts (`api.anthropic.com`/`anthropic.com`). Verify the relay
 project, health endpoint, and a sanitized Anthropic request before serving
 traffic; deploy app changes through blue-green and keep one Traefik.
 
-### Context-window policy
-
-Presets and users include an **Allow extended context window** policy switch. It is disabled by default and available as a per-user override. The migration explicitly enables it for the existing user `Devasheesh`; provider-specific context capabilities remain negotiated by the upstream endpoint.
 
 ### Pool exhaustion and reset credits
 
