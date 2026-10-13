@@ -307,6 +307,7 @@ class UsageRecordDb(DatabaseBase):
     billed_cost_usd = Column(Float, nullable=True)
     duration_ms = Column(Float, nullable=True)
     tokens_per_second = Column(Float, nullable=True)
+    usage_reported = Column(Boolean, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (

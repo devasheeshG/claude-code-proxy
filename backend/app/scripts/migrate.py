@@ -236,6 +236,8 @@ def sync_canonical_schema() -> None:
         )
         inspector = inspect(connection)
         usage_columns = {column["name"] for column in inspector.get_columns("usage_records")}
+        if "usage_reported" not in usage_columns:
+            connection.execute(text("ALTER TABLE usage_records ADD COLUMN usage_reported BOOLEAN"))
         if "fallback_provider_id" not in usage_columns:
             connection.execute(
                 text("ALTER TABLE usage_records ADD COLUMN fallback_provider_id UUID REFERENCES anthropic_fallbacks(id) ON DELETE SET NULL")

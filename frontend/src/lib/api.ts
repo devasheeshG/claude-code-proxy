@@ -216,6 +216,7 @@ export const api = {
         end?: string,
         requestId?: string,
         model?: string,
+        groupBy?: "request",
     ) {
         const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
         if (eventType) params.set("event_type", eventType);
@@ -224,6 +225,7 @@ export const api = {
         if (end) params.set("end", end);
         if (requestId) params.set("request_id", requestId);
         if (model) params.set("model", model);
+        if (groupBy) params.set("group_by", groupBy);
         return request<ProxyEventPage>(`/v1/events?${params.toString()}`);
     },
 
