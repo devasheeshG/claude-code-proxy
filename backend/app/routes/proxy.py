@@ -1262,14 +1262,12 @@ async def proxy_messages(
     status_code = resp.status_code
 
     async def stream_body():
-        finished = False
         try:
             async for chunk in _iter_sanitized_sse(resp, usage_accumulator=accumulator):
                 yield _restore_requested_model_in_sse_frame(chunk, requested_model)
-            finished = True
         finally:
             captured_usage = accumulator.result()
-            succeeded = finished and accumulator.completed and not accumulator.failed
+            succeeded = accumulator.completed and not accumulator.failed
             _emit_event(
                 request,
                 "response.completed" if succeeded else "response.failed",
