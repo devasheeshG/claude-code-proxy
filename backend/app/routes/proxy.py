@@ -1206,6 +1206,7 @@ async def proxy_messages(
         account_id=chosen_id,
         fallback_provider_id=chosen_fallback_id,
         status_code=resp.status_code,
+        metadata={"request_outcome": "failed" if resp.status_code >= 400 else ("pending" if "text/event-stream" in content_type else "succeeded")},
     )
     _set_archive_metadata(
         request,
