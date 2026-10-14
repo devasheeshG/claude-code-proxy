@@ -33,7 +33,7 @@ const EVENT_TYPES = [
     "response.failed",
     "response.interrupted",
 ];
-const GROUP_BY_OPTIONS = ["events"] as const;
+const GROUP_BY_OPTIONS = ["agent_run", "conversation", "session"] as const;
 type GroupBy = "request" | (typeof GROUP_BY_OPTIONS)[number];
 const initialRange = (): TimeRange => {
     const now = new Date();
@@ -109,8 +109,24 @@ function displayModel(metadata: Record<string, unknown>): string {
         : compact(effective);
 }
 
+function groupByLabel(groupBy: GroupBy): string {
+    if (groupBy === "agent_run") return "Agent run";
+    if (groupBy === "conversation") return "Conversation";
+    if (groupBy === "session") return "Codex session";
+    return "Individual requests";
+}
+
 function groupValue(event: ProxyEvent, groupBy: GroupBy): string {
-    return groupBy === "request" ? event.request_id : event.id;
+    if (groupBy === "request") return event.request_id;
+    const metadata = event.metadata as Record<string, unknown>;
+    const field =
+        groupBy === "agent_run"
+            ? "codex_root_turn_id"
+            : groupBy === "conversation"
+              ? "codex_thread_id"
+              : "codex_session_id";
+    const value = (event as unknown as Record<string, unknown>)[field] ?? metadata[field];
+    return typeof value === "string" && value.trim() ? value : `missing:${event.request_id}`;
 }
 
 function CacheReadMetric({ cached, input }: { cached: unknown; input: unknown }) {
@@ -405,7 +421,9 @@ export default function EventsPage() {
                         value={groupBy}
                         options={[
                             { value: "request", label: "Individual requests" },
-                            { value: "events", label: "All events" },
+                            { value: "agent_run", label: "Agent run" },
+                            { value: "conversation", label: "Conversation" },
+                            { value: "session", label: "Codex session" },
                         ]}
                         onChange={(next) => {
                             const nextGroupBy = next as GroupBy;
@@ -562,7 +580,7 @@ export default function EventsPage() {
                                                                 className={`border-ink-800 border-b align-top ${isSummary ? requestTone(allEvents) : rowTone(e.event_type)}`}
                                                             >
                                                                 <td
-                                                                    className={`text-fog-400 w-44 min-w-44 py-3 pr-3 font-mono text-xs whitespace-nowrap ${groupBy === "request" && !isSummary ? "pl-8" : "pl-3"}`}
+                                                                    className={`text-fog-400 w-44 min-w-44 py-3 pr-3 font-mono text-xs whitespace-nowrap ${!isSummary ? "pl-8" : "pl-3"}`}
                                                                 >
                                                                     <span className="block">
                                                                         {formatDateTime(
