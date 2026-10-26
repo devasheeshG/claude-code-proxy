@@ -530,7 +530,7 @@ export default function OverviewPage() {
                         </div>
                     </Card>
 
-                    <SystemTokenFlow stats={stats} rangeLabel={range.label} />
+                    <SystemTokenFlow stats={stats} />
 
                     <QuotaAverages stats={stats} />
 
@@ -752,7 +752,7 @@ export default function OverviewPage() {
     );
 }
 
-function SystemTokenFlow({ stats, rangeLabel }: { stats: OverviewStats; rangeLabel: string }) {
+function SystemTokenFlow({ stats }: { stats: OverviewStats }) {
     const inputRate = Math.max(0, Math.min(100, stats.input_rate_pct));
     const outputRate = Math.max(0, Math.min(100, stats.output_rate_pct));
     const cacheHitRate = Math.max(0, Math.min(100, stats.cache_hit_rate_pct));
@@ -761,12 +761,7 @@ function SystemTokenFlow({ stats, rangeLabel }: { stats: OverviewStats; rangeLab
         <Card className="grid grid-cols-1 overflow-hidden md:grid-cols-2">
             <div className="p-5 sm:p-6">
                 <div className="flex items-center justify-between gap-3">
-                    <div className="text-fog-400 text-[11px] font-medium tracking-wider uppercase">
-                        Input vs output rate
-                    </div>
-                    <span className="text-fog-500 text-[10px] tracking-wide uppercase">
-                        {rangeLabel}
-                    </span>
+                    <h3 className="text-fog-100 text-sm font-semibold">Input vs output rate</h3>
                 </div>
                 <div className="mt-4 grid grid-cols-2 gap-4">
                     <div>
@@ -809,9 +804,9 @@ function SystemTokenFlow({ stats, rangeLabel }: { stats: OverviewStats; rangeLab
             </div>
 
             <div className="border-ink-700 border-t p-5 sm:p-6 md:border-t-0 md:border-l">
-                <div className="text-fog-400 text-[11px] font-medium tracking-wider uppercase">
+                <h3 className="text-fog-100 text-sm font-semibold">
                     Input cache hit rate
-                </div>
+                </h3>
                 <div className="mt-4 flex items-baseline justify-between gap-4">
                     <div className="text-fog-100 font-mono text-4xl font-semibold tabular-nums">
                         {cacheHitRate.toFixed(1)}%
@@ -878,9 +873,7 @@ function QuotaAverageCell({
         <div
             className={`p-5 sm:p-6 ${divided ? "border-ink-700 border-t md:border-t-0 md:border-l" : ""}`}
         >
-            <div className="text-fog-400 text-[11px] font-medium tracking-wider uppercase">
-                {label}
-            </div>
+            <h3 className="text-fog-100 text-sm font-semibold">{label}</h3>
             <div className="text-fog-100 mt-4 font-mono text-4xl font-semibold tabular-nums">
                 {percentage.toFixed(1)}%
             </div>
@@ -1015,9 +1008,7 @@ function UserInsightsCard({
         <Card className="overflow-hidden">
             <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                    <div className="text-fog-400 text-xs font-medium tracking-wider uppercase">
-                        User analytics
-                    </div>
+                    <h3 className="text-fog-100 text-sm font-semibold">User analytics</h3>
                     <div className="text-fog-500 mt-1 font-mono text-[11px]">
                         {formatNumber(users.length)} active users
                     </div>
@@ -1027,7 +1018,7 @@ function UserInsightsCard({
                     role="tablist"
                     aria-label="User analytics view"
                 >
-                    {(["tokens", "models", "thinking"] as const).map((tab) => (
+                    {(["models", "tokens", "thinking"] as const).map((tab) => (
                         <button
                             key={tab}
                             type="button"
@@ -1394,21 +1385,17 @@ function DistributionCard({ distro }: { distro: DistributionResponse }) {
     return (
         <Card className="p-5">
             <div className="flex items-baseline justify-between">
-                <div className="text-fog-400 text-xs font-medium tracking-wider uppercase">
+                <h3 className="text-fog-100 text-sm font-semibold">
                     Per-request token distribution
-                </div>
+                </h3>
             </div>
             <div className="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-2">
                 <div>
-                    <h4 className="text-fog-200 mb-3 text-xs font-semibold tracking-wider uppercase">
-                        Input tokens
-                    </h4>
+                    <h4 className="text-fog-200 mb-3 text-xs font-semibold">Input tokens</h4>
                     {bars(distro.input_tokens, "coral")}
                 </div>
                 <div>
-                    <h4 className="text-fog-200 mb-3 text-xs font-semibold tracking-wider uppercase">
-                        Output tokens
-                    </h4>
+                    <h4 className="text-fog-200 mb-3 text-xs font-semibold">Output tokens</h4>
                     {bars(distro.output_tokens, "amber")}
                 </div>
             </div>
