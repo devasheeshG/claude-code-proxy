@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
@@ -156,9 +156,9 @@ export default function EventsPage() {
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const queryString = searchParams.toString();
+    const defaultRange = useMemo(initialRange, []);
     const query = useMemo(() => {
         const params = new URLSearchParams(queryString);
-        const defaultRange = initialRange();
         const pageSizeValue = Number(params.get("pageSize"));
         const pageValue = Number(params.get("page"));
         const pageSize = PAGE_SIZE_OPTIONS.includes(
@@ -185,11 +185,12 @@ export default function EventsPage() {
                 start:
                     params.get("start") ||
                     (rangeLabel === "All time" ? undefined : defaultRange.start),
-                end: params.get("end") || defaultRange.end,
+                end:
+                    params.get("end") || (rangeLabel === "All time" ? defaultRange.end : undefined),
                 label: rangeLabel || defaultRange.label,
             } satisfies TimeRange,
         };
-    }, [queryString]);
+    }, [queryString, defaultRange]);
     const [range, setRange] = useState<TimeRange>(initialRange);
     const [users, setUsers] = useState<UserLookup[]>([]);
     const [models, setModels] = useState<string[]>([]);
@@ -210,8 +211,10 @@ export default function EventsPage() {
     const [error, setError] = useState<string | null>(null);
     const [captureEventId, setCaptureEventId] = useState<string | null>(null);
     const [captureSide, setCaptureSide] = useState<"request" | "response">("response");
+    const eventRequestId = useRef(0);
     const load = useCallback(
         (pageOffset = offset, selectedEventType = eventType, selectedModel = model) => {
+            const requestId = ++eventRequestId.current;
             setLoading(true);
             setError(null);
             return api
@@ -227,11 +230,17 @@ export default function EventsPage() {
                     groupBy,
                 )
                 .then((page) => {
+                    if (requestId !== eventRequestId.current) return;
                     setEvents(page.events);
                     setTotal(page.total);
                 })
-                .catch((e) => setError(e instanceof Error ? e.message : "Unable to load events."))
-                .finally(() => setLoading(false));
+                .catch((e) => {
+                    if (requestId === eventRequestId.current)
+                        setError(e instanceof Error ? e.message : "Unable to load events.");
+                })
+                .finally(() => {
+                    if (requestId === eventRequestId.current) setLoading(false);
+                });
         },
         [eventType, groupBy, model, offset, pageSize, range.end, range.start, userId],
     );
@@ -268,15 +277,28 @@ export default function EventsPage() {
         }
     }, [load, updateUrl]);
     useEffect(() => {
-        api.analyticsUsers()
-            .then(setUsers)
+        if (!queryHydrated) return;
+        let cancelled = false;
+        api.analyticsLookups(range, userId || undefined)
+            .then((data) => {
+                if (!cancelled) {
+                    setUsers(data.users);
+                    setModels(data.models);
+                }
+            })
             .catch(() => {});
-        api.analyticsModels()
-            .then(setModels)
-            .catch(() => {});
-    }, []);
+        return () => {
+            cancelled = true;
+        };
+    }, [queryHydrated, range, userId]);
     useEffect(() => {
-        setRange(query.range);
+        setRange((current) =>
+            current.start === query.range.start &&
+            current.end === query.range.end &&
+            current.label === query.range.label
+                ? current
+                : query.range,
+        );
         setUserId(query.userId);
         setEventType(query.eventType);
         setModel(query.model);
@@ -414,6 +436,7 @@ export default function EventsPage() {
                     label="Model"
                     allLabel="All models"
                     idPrefix="event-model-options"
+                    showArrow={false}
                 />
                 <div className="min-w-[220px]">
                     <span className="text-fog-400 block text-xs">Group by</span>

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import desc, func, or_
+from sqlalchemy import JSON, cast, desc, func, or_
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -62,17 +62,18 @@ def list_events(
         # hierarchy or splits one group across pages.
         group_column = {
             "request": ProxyEventDb.request_id,
-            "agent_run": ProxyEventDb.codex_root_turn_id,
-            "conversation": ProxyEventDb.codex_thread_id,
-            "session": ProxyEventDb.codex_session_id,
+            "agent_run": cast(ProxyEventDb.metadata_json, JSON)["codex_root_turn_id"].as_string(),
+            "conversation": cast(ProxyEventDb.metadata_json, JSON)["codex_thread_id"].as_string(),
+            "session": cast(ProxyEventDb.metadata_json, JSON)["codex_session_id"].as_string(),
         }[group_by]
         group_key = func.coalesce(group_column, ProxyEventDb.request_id)
         groups = query.with_entities(
             group_key.label("group_key"),
             func.max(ProxyEventDb.created_at).label("latest_at"),
+            func.count().over().label("group_total"),
         ).group_by(group_key)
-        total = groups.count()
         selected = groups.order_by(desc("latest_at"), desc("group_key")).offset(offset).limit(limit).all()
+        total = int(selected[0].group_total) if selected else groups.count()
         selected_keys = [row.group_key for row in selected]
         rows = (
             db.query(ProxyEventDb)
